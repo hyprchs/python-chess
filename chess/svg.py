@@ -229,18 +229,14 @@ def _piece_defs_id(piece: chess.Piece, *, piece_set: str) -> str:
 
 def load_pieces(piece_set: str) -> dict[str, str]:
     """
-    Loads piece SVGs from ``chess/new_piece/<piece_set>`` or ``chess/piece/<piece_set>``
-    (whichever exists), caching results in-process.
+    Loads piece SVGs from ``chess/piece/<piece_set>``, caching results in-process.
     """
     if piece_set in _PIECE_SETS:
         return _PIECE_SETS[piece_set]
 
     this_dir = os.path.dirname(os.path.realpath(__file__))
-    for piece_dir in ("new_piece", "piece"):
-        piece_set_dir = os.path.join(this_dir, piece_dir, piece_set)
-        if os.path.isdir(piece_set_dir):
-            break
-    else:
+    piece_set_dir = os.path.join(this_dir, "piece", piece_set)
+    if not os.path.isdir(piece_set_dir):
         raise FileNotFoundError(f"Piece set not found: {piece_set!r}")
 
     pieces: dict[str, str] = {}

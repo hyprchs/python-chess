@@ -70,9 +70,7 @@ setuptools.setup(
     package_data={
         "chess": [
             "py.typed",
-            "new_piece/*/*.svg",
             "piece/*/*.svg",
-            "piece_png/*/*.png",
         ],
     },
     python_requires=">=3.8",
