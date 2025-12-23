@@ -226,6 +226,52 @@ def _piece_defs_id(piece: chess.Piece, *, piece_set: str) -> str:
         return chess.PIECE_NAMES[piece.piece_type].lower()
     return f"{chess.COLOR_NAMES[piece.color].lower()}-{chess.PIECE_NAMES[piece.piece_type].lower()}"
 
+def _parse_viewbox(view_box: str) -> tuple[float, float, float, float] | None:
+    parts = view_box.replace(",", " ").split()
+    if len(parts) != 4:
+        return None
+    try:
+        min_x, min_y, width, height = (float(p) for p in parts)
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return min_x, min_y, width, height
+
+
+def _normalize_piece_svg(svg_element: ET.Element) -> ET.Element:
+    """
+    Converts an external piece SVG into a <g> element that fits into the
+    45x45 square used by python-chess SVG boards.
+
+    Many piece sets use arbitrary viewBox sizes (e.g. 2048x2048). If we embed
+    the raw <svg> directly in <defs> and <use> it, it renders at the wrong
+    scale. Normalizing here makes piece rendering consistent across sets.
+    """
+    if svg_element.tag.endswith("svg"):
+        parsed = _parse_viewbox(svg_element.get("viewBox", ""))
+    else:
+        parsed = None
+
+    if parsed is None:
+        # Best-effort fallback: treat the element's coordinate system as already
+        # matching our square size.
+        wrapper = ET.Element("g")
+        wrapper.extend(list(svg_element))
+        return wrapper
+
+    min_x, min_y, width, height = parsed
+
+    # Preserve aspect ratio: fit the larger dimension to the square and center.
+    scale = SQUARE_SIZE / max(width, height)
+    dx = -min_x * scale + (SQUARE_SIZE - width * scale) / 2
+    dy = -min_y * scale + (SQUARE_SIZE - height * scale) / 2
+
+    wrapper = ET.Element("g")
+    wrapper.set("transform", f"translate({dx:.6f},{dy:.6f}) scale({scale:.6f})")
+    wrapper.extend(list(svg_element))
+    return wrapper
+
 
 def load_pieces(piece_set: str) -> dict[str, str]:
     """
@@ -273,7 +319,8 @@ def piece(piece: chess.Piece, size: Optional[int] = None, *, piece_set: Optional
         svg.append(ET.fromstring(PIECES[piece.symbol()]))
     else:
         piece_svg = load_pieces(piece_set)[_piece_code(piece, piece_set=piece_set)]
-        svg.append(ET.fromstring(piece_svg))
+        piece_element = ET.fromstring(piece_svg)
+        svg.append(_normalize_piece_svg(piece_element))
     return SvgWrapper(ET.tostring(svg).decode("utf-8"))
 
 
@@ -377,8 +424,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
 
                     svg_content = pieces[piece_code]
                     svg_element = ET.fromstring(svg_content)
-                    svg_element.set("id", piece_defs_id)
-                    defs.append(svg_element)
+                    normalized = _normalize_piece_svg(svg_element)
+                    normalized.set("id", piece_defs_id)
+                    defs.append(normalized)
                     existing_piece_defs.add(piece_defs_id)
 
     squares = chess.SquareSet(squares) if squares else chess.SquareSet()
