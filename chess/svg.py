@@ -326,7 +326,6 @@ def piece(piece: chess.Piece, size: Optional[int] = None, *, piece_set: Optional
 
 def board(board: Optional[chess.BaseBoard] = None, *,
           orientation: Color = chess.WHITE,
-          flipped: bool = False,
           lastmove: Optional[chess.Move] = None,
           check: Optional[Square] = None,
           arrows: Iterable[Union[Arrow, Tuple[Square, Square]]] = [],
@@ -382,11 +381,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
 
     .. image:: ../docs/Ne4.svg
         :alt: 8/8/8/8/4N3/8/8/8
-
-    .. deprecated:: 1.1
-        Use *orientation* with a color instead of the *flipped* toggle.
     """
-    orientation ^= flipped
     inner_border = 1 if borders and coordinates else 0
     outer_border = 1 if borders else 0
     margin = 15 if coordinates else 0
