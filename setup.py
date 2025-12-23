@@ -68,7 +68,10 @@ setuptools.setup(
     test_suite="test",
     zip_safe=False,  # For mypy
     package_data={
-        "chess": ["py.typed"],
+        "chess": [
+            "py.typed",
+            "piece/*/*.svg",
+        ],
     },
     python_requires=">=3.8",
     classifiers=[

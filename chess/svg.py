@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
 import math
 import xml.etree.ElementTree as ET
+from functools import lru_cache
+from pathlib import Path
 
 import chess
 
@@ -11,6 +14,21 @@ from chess import Color, IntoSquareSet, Square
 
 SQUARE_SIZE = 45
 MARGIN = 20
+
+_PIECE_SETS: dict[str, dict[str, str]] = {}
+
+@lru_cache(maxsize=1)
+def available_piece_sets() -> list[str]:
+    """
+    Returns the available piece set names shipped in ``chess/piece``.
+
+    Note: python-chess sets ``zip_safe=False``, so package data is available on
+    the filesystem and can be listed directly.
+    """
+    piece_root = Path(__file__).resolve().parent / "piece"
+    if not piece_root.is_dir():
+        return []
+    return sorted(p.name for p in piece_root.iterdir() if p.is_dir())
 
 PIECES = {
     "b": """<g id="black-bishop" class="black bishop" fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1.65.54 3 2-.68.97-1.65.99-3 .5-3.39-.97-10.11.46-13.5-1-3.39 1.46-10.11.03-13.5 1-1.354.49-2.323.47-3-.5 1.354-1.94 3-2 3-2zm6-4c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2zM25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0z" fill="#000" stroke-linecap="butt"/><path d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5" stroke="#fff" stroke-linejoin="miter"/></g>""",  # noqa: E501
@@ -200,7 +218,106 @@ def _coord(text: str, x: int, y: int, width: int, height: int, horizontal: bool,
     return t
 
 
-def piece(piece: chess.Piece, size: Optional[int] = None) -> str:
+def _piece_code(piece: chess.Piece, *, piece_set: str) -> str:
+    """
+    Returns the piece "code", like ``wP`` or ``bN``, for the given piece.
+
+    The ``mono`` piece set is special in that its pieces are grayscale and
+    do not differentiate by color, so the color prefix is omitted (e.g. ``P``).
+    """
+    if piece_set == "mono":
+        return chess.PIECE_SYMBOLS[piece.piece_type].upper()
+    return f"{chess.COLOR_NAMES[piece.color][0].lower()}{chess.PIECE_SYMBOLS[piece.piece_type].upper()}"
+
+
+def _piece_defs_id(piece: chess.Piece, *, piece_set: str) -> str:
+    """
+    Returns an ``id`` attribute for a piece SVG element that will be unique
+    within a generated board SVG.
+
+    For the ``mono`` piece set, the color prefix is omitted.
+    """
+    if piece_set == "mono":
+        return chess.PIECE_NAMES[piece.piece_type].lower()
+    return f"{chess.COLOR_NAMES[piece.color].lower()}-{chess.PIECE_NAMES[piece.piece_type].lower()}"
+
+def _parse_viewbox(view_box: str) -> tuple[float, float, float, float] | None:
+    parts = view_box.replace(",", " ").split()
+    if len(parts) != 4:
+        return None
+    try:
+        min_x, min_y, width, height = (float(p) for p in parts)
+    except ValueError:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return min_x, min_y, width, height
+
+
+def _normalize_piece_svg(svg_element: ET.Element) -> ET.Element:
+    """
+    Converts an external piece SVG into a <g> element that fits into the
+    45x45 square used by python-chess SVG boards.
+
+    Many piece sets use arbitrary viewBox sizes (e.g. 2048x2048). If we embed
+    the raw <svg> directly in <defs> and <use> it, it renders at the wrong
+    scale. Normalizing here makes piece rendering consistent across sets.
+    """
+    if svg_element.tag.endswith("svg"):
+        parsed = _parse_viewbox(svg_element.get("viewBox", ""))
+    else:
+        parsed = None
+
+    if parsed is None:
+        # Best-effort fallback: treat the element's coordinate system as already
+        # matching our square size.
+        wrapper = ET.Element("g")
+        wrapper.extend(list(svg_element))
+        return wrapper
+
+    min_x, min_y, width, height = parsed
+
+    # Preserve aspect ratio: fit the larger dimension to the square and center.
+    scale = SQUARE_SIZE / max(width, height)
+    dx = -min_x * scale + (SQUARE_SIZE - width * scale) / 2
+    dy = -min_y * scale + (SQUARE_SIZE - height * scale) / 2
+
+    wrapper = ET.Element("g")
+    wrapper.set("transform", f"translate({dx:.6f},{dy:.6f}) scale({scale:.6f})")
+    wrapper.extend(list(svg_element))
+    return wrapper
+
+
+def load_pieces(piece_set: str) -> dict[str, str]:
+    """
+    Loads piece SVGs from ``chess/piece/<piece_set>``, caching results in-process.
+    """
+    if piece_set in _PIECE_SETS:
+        return _PIECE_SETS[piece_set]
+
+    this_dir = os.path.dirname(os.path.realpath(__file__))
+    piece_set_dir = os.path.join(this_dir, "piece", piece_set)
+    if not os.path.isdir(piece_set_dir):
+        raise FileNotFoundError(f"Piece set not found: {piece_set!r}")
+
+    pieces: dict[str, str] = {}
+    for piece_type in chess.PIECE_TYPES:
+        for color in chess.COLORS:
+            piece = chess.Piece(piece_type, color)
+            piece_code = _piece_code(piece, piece_set=piece_set)
+            if piece_code in pieces:
+                # This should only happen for `piece_set == 'mono'`.
+                continue
+
+            piece_svg_file = os.path.join(piece_set_dir, f"{piece_code}.svg")
+            with open(piece_svg_file, "r", encoding="utf-8") as f:
+                pieces[piece_code] = f.read()
+
+    _PIECE_SETS[piece_set] = pieces
+    return pieces
+
+
+def piece(piece: chess.Piece, size: Optional[int] = None, *, piece_set: Optional[str] = None) -> str:
     """
     Renders the given :class:`chess.Piece` as an SVG image.
 
@@ -213,7 +330,12 @@ def piece(piece: chess.Piece, size: Optional[int] = None) -> str:
         :alt: R
     """
     svg = _svg(SQUARE_SIZE, size)
-    svg.append(ET.fromstring(PIECES[piece.symbol()]))
+    if piece_set is None:
+        svg.append(ET.fromstring(PIECES[piece.symbol()]))
+    else:
+        piece_svg = load_pieces(piece_set)[_piece_code(piece, piece_set=piece_set)]
+        piece_element = ET.fromstring(piece_svg)
+        svg.append(_normalize_piece_svg(piece_element))
     return SvgWrapper(ET.tostring(svg).decode("utf-8"))
 
 
@@ -228,7 +350,8 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           coordinates: bool = True,
           colors: Dict[str, str] = {},
           borders: bool = False,
-          style: Optional[str] = None) -> str:
+          style: Optional[str] = None,
+          piece_set: Optional[str] = None) -> str:
     """
     Renders a board with pieces and/or selected squares as an SVG image.
 
@@ -291,10 +414,30 @@ def board(board: Optional[chess.BaseBoard] = None, *,
 
     defs = ET.SubElement(svg, "defs")
     if board:
-        for piece_color in chess.COLORS:
-            for piece_type in chess.PIECE_TYPES:
-                if board.pieces_mask(piece_type, piece_color):
-                    defs.append(ET.fromstring(PIECES[chess.Piece(piece_type, piece_color).symbol()]))
+        if piece_set is None:
+            for piece_color in chess.COLORS:
+                for piece_type in chess.PIECE_TYPES:
+                    if board.pieces_mask(piece_type, piece_color):
+                        defs.append(ET.fromstring(PIECES[chess.Piece(piece_type, piece_color).symbol()]))
+        else:
+            pieces = load_pieces(piece_set)
+            existing_piece_defs: set[str] = set()
+            for piece_color in chess.COLORS:
+                for piece_type in chess.PIECE_TYPES:
+                    if not board.pieces_mask(piece_type, piece_color):
+                        continue
+                    piece = chess.Piece(piece_type, piece_color)
+                    piece_code = _piece_code(piece, piece_set=piece_set)
+                    piece_defs_id = _piece_defs_id(piece, piece_set=piece_set)
+                    if piece_defs_id in existing_piece_defs:
+                        continue
+
+                    svg_content = pieces[piece_code]
+                    svg_element = ET.fromstring(svg_content)
+                    normalized = _normalize_piece_svg(svg_element)
+                    normalized.set("id", piece_defs_id)
+                    defs.append(normalized)
+                    existing_piece_defs.add(piece_defs_id)
 
     squares = chess.SquareSet(squares) if squares else chess.SquareSet()
     if squares:
@@ -424,7 +567,10 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         if board is not None:
             piece = board.piece_at(square)
             if piece:
-                href = f"#{chess.COLOR_NAMES[piece.color]}-{chess.PIECE_NAMES[piece.piece_type]}"
+                if piece_set is None:
+                    href = f"#{chess.COLOR_NAMES[piece.color]}-{chess.PIECE_NAMES[piece.piece_type]}"
+                else:
+                    href = f"#{_piece_defs_id(piece, piece_set=piece_set)}"
                 ET.SubElement(svg, "use", {
                     "href": href,
                     "xlink:href": href,
