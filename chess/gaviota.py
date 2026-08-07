@@ -1519,8 +1519,8 @@ class PythonTablebase:
             raise KeyError(f"gaviota tables do not contain positions with castling rights: {board.fen()}")
 
         # Supports only up to 5 pieces.
-        if chess.popcount(board.occupied) > 5:
-            raise KeyError(f"gaviota tables support up to 5 pieces, not {chess.popcount(board.occupied)}: {board.fen()}")
+        if board.piece_count() > 5:
+            raise KeyError(f"gaviota tables support up to 5 pieces, not {board.piece_count()}: {board.fen()}")
 
         # KvK is a draw.
         if board.occupied == board.kings:
@@ -1885,8 +1885,8 @@ class NativeTablebase:
         if board.castling_rights:
             raise KeyError(f"gaviota tables do not contain positions with castling rights: {board.fen()}")
 
-        if chess.popcount(board.occupied) > 5:
-            raise KeyError(f"gaviota tables support up to 5 pieces, not {chess.popcount(board.occupied)}: {board.fen()}")
+        if board.piece_count() > 5:
+            raise KeyError(f"gaviota tables support up to 5 pieces, not {board.piece_count()}: {board.fen()}")
 
         stm = ctypes.c_uint(0 if board.turn == chess.WHITE else 1)
         ep_square = ctypes.c_uint(board.ep_square if board.ep_square else 64)
