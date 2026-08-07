@@ -779,7 +779,7 @@ class BoardTestCase(unittest.TestCase):
         self.assertEqual(fen, board.fen(), msg="Board unchanged by variation_san")
         board.push(chess.Move.from_uci(variation.pop(0)))
         var_b = board.variation_san([chess.Move.from_uci(m) for m in variation])
-        self.assertEqual(("19...Kxh7 20. Qh5+ Kg8 21. Rg3 Bf8 22. Bg5 Re7 "
+        self.assertEqual(("19... Kxh7 20. Qh5+ Kg8 21. Rg3 Bf8 22. Bg5 Re7 "
                           "23. Bf6 Nd7 24. Qh6 Nxf6 25. exf6 g6 26. fxe7 Bxe7"),
                          var_b)
 
@@ -1042,6 +1042,10 @@ class BoardTestCase(unittest.TestCase):
         board = chess.Board("8/8/5k2/p1q5/PP1rp1P1/3P1N2/2RK1r2/5nN1 w - - 0 3")
         self.assertEqual(board.status(), chess.STATUS_VALID)
 
+        # Multiple stepping checkers.
+        board = chess.Board("8/8/N7/2k5/N7/8/8/3K4 b - - 0 1")
+        self.assertEqual(board.status(), chess.STATUS_IMPOSSIBLE_CHECK)
+
     def test_one_king_movegen(self):
         board = chess.Board.empty()
         board.set_piece_at(chess.A1, chess.Piece(chess.KING, chess.WHITE))
@@ -1220,7 +1224,7 @@ class BoardTestCase(unittest.TestCase):
         self.assertFalse(board.ep_square)
 
         self.assertFalse(board.piece_at(chess.E1))
-        self.assertEqual(chess.popcount(board.occupied), 0)
+        self.assertEqual(board.piece_count(), 0)
 
     def test_threefold_repetition(self):
         board = chess.Board()
@@ -1719,6 +1723,10 @@ class BoardTestCase(unittest.TestCase):
         self.assertTrue(board.has_pseudo_legal_en_passant())
         self.assertFalse(board.has_legal_en_passant())
         self.assertEqual(len(list(board.legal_moves)), 2)
+
+    def test_multiple_kings(self):
+        board = chess.Board("KKKK1kkk/8/8/8/8/8/8/8 w - - 0 1")
+        self.assertEqual(board.king(chess.WHITE), None)
 
 
 class LegalMoveGeneratorTestCase(unittest.TestCase):
@@ -2224,6 +2232,24 @@ class PgnTestCase(unittest.TestCase):
 
         self.assertEqual(sixth_game.headers["White"], "Deep Blue (Computer)")
         self.assertEqual(sixth_game.headers["Result"], "1-0")
+
+    def test_read_game_with_leading_whitespace_before_header(self):
+        pgn = io.StringIO(
+            ' [Event "TCEC Season 27 - Entrance League"]\n'
+            '[Site "https://tcec-chess.com"]\n'
+            '[White "Patricia 3.1_dev_ca7ef0a3"]\n'
+            '[Black "Weiss 2.1-dev11"]\n'
+            '[Result "*"]\n'
+            "\n"
+            "1. d4 *"
+        )
+
+        game = chess.pgn.read_game(pgn)
+
+        self.assertEqual(game.headers["Event"], "TCEC Season 27 - Entrance League")
+        self.assertEqual(game.headers["White"], "Patricia 3.1_dev_ca7ef0a3")
+        self.assertEqual(game.next().move, chess.Move.from_uci("d2d4"))
+        self.assertEqual(game.errors, [])
 
     def test_read_game_with_multicomment_move(self):
         pgn = io.StringIO("1. e4 {A common opening} 1... e5 {A common response} {An uncommon comment}")
@@ -4560,6 +4586,11 @@ class AtomicTestCase(unittest.TestCase):
     def test_atomic_validity(self):
         # 14 checkers, the maximum in Atomic chess.
         board = chess.variant.AtomicBoard("3N1NB1/2N1Q1N1/3RkR2/2NP1PN1/3NKN2/8/8/n7 w - - 0 1")
+        self.assertEqual(board.status(), chess.STATUS_VALID)
+
+        # Multiple stepping checkers possible, because opponent king may have
+        # moved away.
+        board = chess.variant.AtomicBoard("8/8/N7/2k1K3/N7/8/8/8 b - - 0 1")
         self.assertEqual(board.status(), chess.STATUS_VALID)
 
     def test_atomic960(self):

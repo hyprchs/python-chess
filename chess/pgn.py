@@ -402,7 +402,7 @@ class GameNode(abc.ABC):
 
     def add_variation(self, move: chess.Move, *, comment: Union[str, list[str]] = "", starting_comment: Union[str, list[str]] = "", nags: Iterable[int] = []) -> ChildNode:
         """Creates a child node with the given attributes."""
-        # Instanciate ChildNode only in this method.
+        # Instantiate ChildNode only in this method.
         return ChildNode(self, move, comment=comment, starting_comment=starting_comment, nags=nags)
 
     def add_main_variation(self, move: chess.Move, *, comment: str = "", nags: Iterable[int] = []) -> ChildNode:
@@ -1636,13 +1636,14 @@ def read_game(handle: TextIO, *, Visitor: Any = GameBuilder) -> Any:
                 if not isinstance(managed_headers, Headers):
                     unmanaged_headers = Headers({})
 
-        if not line.startswith("["):
+        stripped = line.lstrip()
+        if not stripped.startswith("["):
             break
 
         consecutive_empty_lines = 0
 
         if not skipping_game:
-            tag_match = TAG_REGEX.match(line)
+            tag_match = TAG_REGEX.match(stripped)
             if tag_match:
                 visitor.visit_header(tag_match.group(1), tag_match.group(2))
                 if unmanaged_headers is not None:

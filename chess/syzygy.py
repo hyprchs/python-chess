@@ -1548,8 +1548,8 @@ class Tablebase:
         try:
             table = typing.cast(WdlTable, self.wdl[key])
         except KeyError:
-            if chess.popcount(board.occupied) > TBPIECES:
-                raise KeyError(f"syzygy tables support up to {TBPIECES} pieces, not {chess.popcount(board.occupied)}: {board.fen()}")
+            if board.piece_count() > TBPIECES:
+                raise KeyError(f"syzygy tables support up to {TBPIECES} pieces, not {board.piece_count()}: {board.fen()}")
             raise MissingTableError(f"did not find wdl table {key}")
 
         self._bump_lru(table)
@@ -1567,8 +1567,8 @@ class Tablebase:
         # positions that have more pieces than the maximum number of supported
         # pieces. We artificially limit this to one additional level, to
         # make sure search remains somewhat bounded.
-        if chess.popcount(board.occupied) > TBPIECES + 1:
-            raise KeyError(f"syzygy tables support up to {TBPIECES} pieces, not {chess.popcount(board.occupied)}: {board.fen()}")
+        if board.piece_count() > TBPIECES + 1:
+            raise KeyError(f"syzygy tables support up to {TBPIECES} pieces, not {board.piece_count()}: {board.fen()}")
 
         # Special case: Variant with compulsory captures.
         if self.variant.captures_compulsory:
@@ -1613,7 +1613,7 @@ class Tablebase:
 
         threats_found = False
 
-        if threats or chess.popcount(board.occupied) >= 6:
+        if threats or board.piece_count() >= 6:
             for threat in board.generate_legal_moves(~board.pawns):
                 board.push(threat)
                 try:
