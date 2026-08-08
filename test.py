@@ -4410,6 +4410,38 @@ class SvgTestCase(unittest.TestCase):
         svg = chess.svg.piece(chess.Piece.from_symbol("K"))
         self.assertIn("id=\"white-king\"", svg)
 
+    def test_svg_piece_set_preserves_root_presentation_attributes(self):
+        piece = chess.Piece.from_symbol("P")
+        self.assertIn("shape-rendering=\"crispEdges\"", chess.svg.piece(piece, piece_set="pixel"))
+
+        board = chess.Board("8/8/8/8/8/8/4P3/8 w - - 0 1")
+        self.assertIn("shape-rendering=\"crispEdges\"", chess.svg.board(board, piece_set="pixel"))
+
+    def test_svg_piece_set_normalizes_numeric_dimensions_without_a_viewbox(self):
+        svg = chess.svg.ET.fromstring("<svg width=\"90\" height=\"45\"><path /></svg>")
+        normalized = chess.svg._normalize_piece_svg(svg)
+        self.assertEqual(normalized.get("transform"), "translate(0.000000,11.250000) scale(0.500000)")
+
+    def test_svg_piece_set_rejects_an_invalid_viewbox(self):
+        svg = chess.svg.ET.fromstring("<svg viewBox=\"0 0 invalid 45\"><path /></svg>")
+        with self.assertRaisesRegex(ValueError, "invalid viewBox"):
+            chess.svg._normalize_piece_svg(svg)
+
+    def test_svg_piece_set_scopes_internal_identifiers(self):
+        svg = chess.svg.ET.fromstring(
+            "<svg viewBox=\"0 0 45 45\"><defs><linearGradient id=\"gradient\" /></defs>"
+            "<style>.primary,.secondary { fill: url(#gradient); }</style>"
+            "<path class=\"primary secondary\" fill=\"url(#gradient)\" style=\"stroke:url(#gradient)\" />"
+            "<use href=\"#gradient\" /></svg>")
+        normalized = chess.svg._normalize_piece_svg(svg, id_prefix="wP")
+        normalized_svg = chess.svg.ET.tostring(normalized).decode("utf-8")
+        self.assertIn('id="wP-gradient"', normalized_svg)
+        self.assertIn('class="wP-primary wP-secondary"', normalized_svg)
+        self.assertIn('.wP-primary,.wP-secondary', normalized_svg)
+        self.assertIn('fill="url(#wP-gradient)"', normalized_svg)
+        self.assertIn('stroke:url(#wP-gradient)', normalized_svg)
+        self.assertIn('href="#wP-gradient"', normalized_svg)
+
 
 class SuicideTestCase(unittest.TestCase):
 

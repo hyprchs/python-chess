@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import math
+import re
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
@@ -241,6 +242,22 @@ def _piece_defs_id(piece: chess.Piece, *, piece_set: str) -> str:
         return chess.PIECE_NAMES[piece.piece_type].lower()
     return f"{chess.COLOR_NAMES[piece.color].lower()}-{chess.PIECE_NAMES[piece.piece_type].lower()}"
 
+
+_SVG_PRESENTATION_ATTRIBUTES = frozenset({
+    "alignment-baseline", "baseline-shift", "clip-path", "clip-rule", "color",
+    "color-interpolation", "color-rendering", "cursor", "direction", "display",
+    "dominant-baseline", "fill", "fill-opacity", "fill-rule", "filter", "flood-color",
+    "flood-opacity", "font-family", "font-size", "font-style", "font-variant", "font-weight",
+    "image-rendering", "letter-spacing", "marker-end", "marker-mid", "marker-start", "mask",
+    "opacity", "overflow", "paint-order", "pointer-events", "shape-rendering", "stop-color",
+    "stop-opacity", "stroke", "stroke-dasharray", "stroke-dashoffset", "stroke-linecap",
+    "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-width", "style",
+    "text-anchor", "text-rendering", "unicode-bidi", "visibility", "word-spacing", "writing-mode",
+})
+
+_SVG_URL_REFERENCE_RE = re.compile(r"url\(\s*#([^)\s]+)\s*\)")
+
+
 def _parse_viewbox(view_box: str) -> tuple[float, float, float, float] | None:
     parts = view_box.replace(",", " ").split()
     if len(parts) != 4:
@@ -249,33 +266,101 @@ def _parse_viewbox(view_box: str) -> tuple[float, float, float, float] | None:
         min_x, min_y, width, height = (float(p) for p in parts)
     except ValueError:
         return None
+    if not all(math.isfinite(value) for value in (min_x, min_y, width, height)):
+        return None
     if width <= 0 or height <= 0:
         return None
     return min_x, min_y, width, height
 
 
-def _normalize_piece_svg(svg_element: ET.Element) -> ET.Element:
+def _parse_svg_length(length: Optional[str]) -> Optional[float]:
+    if length is None:
+        return None
+    try:
+        value = float(length)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def _parse_piece_viewbox(svg_element: ET.Element) -> tuple[float, float, float, float]:
+    if not svg_element.tag.endswith("svg"):
+        raise ValueError("piece SVG root must be an <svg> element")
+
+    view_box = svg_element.get("viewBox")
+    if view_box is not None:
+        parsed = _parse_viewbox(view_box)
+        if parsed is not None:
+            return parsed
+        raise ValueError("piece SVG has an invalid viewBox")
+
+    width = _parse_svg_length(svg_element.get("width"))
+    height = _parse_svg_length(svg_element.get("height"))
+    if width is None or height is None:
+        raise ValueError("piece SVG must have a viewBox or numeric width and height")
+    return 0, 0, width, height
+
+
+def _scope_svg_identifiers(svg_element: ET.Element, prefix: str) -> None:
+    id_map = {
+        element.get("id"): f"{prefix}-{element.get('id')}"
+        for element in svg_element.iter()
+        if element is not svg_element and element.get("id")
+    }
+    class_map = {
+        class_name: f"{prefix}-{class_name}"
+        for element in svg_element.iter()
+        for class_name in element.get("class", "").split()
+    }
+    class_reference_re = re.compile(
+        r"(?<![a-zA-Z0-9_-])\.(%s)(?![a-zA-Z0-9_-])" %
+        "|".join(re.escape(class_name) for class_name in class_map),
+    ) if class_map else None
+
+    def replace_url_reference(match: re.Match[str]) -> str:
+        identifier = match.group(1)
+        return f"url(#{id_map.get(identifier, identifier)})"
+
+    def replace_class_reference(match: re.Match[str]) -> str:
+        class_name = match.group(1)
+        return f".{class_map[class_name]}"
+
+    for element in svg_element.iter():
+        identifier = element.get("id")
+        if identifier in id_map:
+            element.set("id", id_map[identifier])
+
+        classes = element.get("class")
+        if classes:
+            element.set("class", " ".join(class_map[class_name] for class_name in classes.split()))
+
+        for attribute, value in element.attrib.items():
+            if attribute == "id":
+                continue
+            if attribute.rsplit("}", 1)[-1] == "href" and value.startswith("#"):
+                element.set(attribute, f"#{id_map.get(value[1:], value[1:])}")
+            elif "url(#" in value:
+                element.set(attribute, _SVG_URL_REFERENCE_RE.sub(replace_url_reference, value))
+
+        if element.tag.endswith("style") and element.text:
+            element.text = _SVG_URL_REFERENCE_RE.sub(replace_url_reference, element.text)
+            if class_reference_re is not None:
+                element.text = class_reference_re.sub(replace_class_reference, element.text)
+
+
+def _normalize_piece_svg(svg_element: ET.Element, *, id_prefix: Optional[str] = None) -> ET.Element:
     """
     Converts an external piece SVG into a <g> element that fits into the
     45x45 square used by python-chess SVG boards.
 
     Many piece sets use arbitrary viewBox sizes (e.g. 2048x2048). If we embed
     the raw <svg> directly in <defs> and <use> it, it renders at the wrong
-    scale. Normalizing here makes piece rendering consistent across sets.
+    scale. Normalizing here makes piece rendering consistent across sets and
+    scopes local identifiers for a shared board SVG.
     """
-    if svg_element.tag.endswith("svg"):
-        parsed = _parse_viewbox(svg_element.get("viewBox", ""))
-    else:
-        parsed = None
-
-    if parsed is None:
-        # Best-effort fallback: treat the element's coordinate system as already
-        # matching our square size.
-        wrapper = ET.Element("g")
-        wrapper.extend(list(svg_element))
-        return wrapper
-
-    min_x, min_y, width, height = parsed
+    min_x, min_y, width, height = _parse_piece_viewbox(svg_element)
+    if id_prefix is not None:
+        _scope_svg_identifiers(svg_element, id_prefix)
 
     # Preserve aspect ratio: fit the larger dimension to the square and center.
     scale = SQUARE_SIZE / max(width, height)
@@ -284,6 +369,9 @@ def _normalize_piece_svg(svg_element: ET.Element) -> ET.Element:
 
     wrapper = ET.Element("g")
     wrapper.set("transform", f"translate({dx:.6f},{dy:.6f}) scale({scale:.6f})")
+    for attribute, value in svg_element.attrib.items():
+        if attribute in _SVG_PRESENTATION_ATTRIBUTES:
+            wrapper.set(attribute, value)
     wrapper.extend(list(svg_element))
     return wrapper
 
@@ -333,9 +421,10 @@ def piece(piece: chess.Piece, size: Optional[int] = None, *, piece_set: Optional
     if piece_set is None:
         svg.append(ET.fromstring(PIECES[piece.symbol()]))
     else:
-        piece_svg = load_pieces(piece_set)[_piece_code(piece, piece_set=piece_set)]
+        piece_code = _piece_code(piece, piece_set=piece_set)
+        piece_svg = load_pieces(piece_set)[piece_code]
         piece_element = ET.fromstring(piece_svg)
-        svg.append(_normalize_piece_svg(piece_element))
+        svg.append(_normalize_piece_svg(piece_element, id_prefix=piece_code))
     return SvgWrapper(ET.tostring(svg).decode("utf-8"))
 
 
@@ -434,7 +523,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
 
                     svg_content = pieces[piece_code]
                     svg_element = ET.fromstring(svg_content)
-                    normalized = _normalize_piece_svg(svg_element)
+                    normalized = _normalize_piece_svg(svg_element, id_prefix=piece_code)
                     normalized.set("id", piece_defs_id)
                     defs.append(normalized)
                     existing_piece_defs.add(piece_defs_id)
