@@ -4420,12 +4420,24 @@ class SvgTestCase(unittest.TestCase):
 
         self.assertIsNotNone(marker)
         self.assertEqual(marker.get("refX"), "2.05")
-        self.assertEqual(marker.find(f"{namespace}path").get("d"), "M0,0 V4 L3,2 Z")
+        marker_path = marker.find(f"{namespace}path")
+        self.assertEqual(marker_path.get("d"), "M0,0 V4 L3,2 Z")
+        self.assertEqual(marker_path.get("class"), "arrow lichess")
         self.assertIsNotNone(line)
         self.assertEqual(line.get("class"), "arrow lichess")
         self.assertEqual(line.get("stroke-linecap"), "round")
         self.assertEqual(float(line.get("stroke-width")), chess.svg.SQUARE_SIZE * 10 / 64)
-        self.assertEqual(line.get("marker-end"), "url(#arrowhead-0)")
+        self.assertEqual(line.get("marker-end"), f"url(#{marker.get('id')})")
+
+    def test_svg_lichess_arrow_marker_ids_include_color(self):
+        namespace = "{http://www.w3.org/2000/svg}"
+        marker_ids = []
+        for color in ["green", "red"]:
+            svg = chess.svg.board(arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)])
+            root = chess.svg.ET.fromstring(svg)
+            marker_ids.append(root.find(f".//{namespace}marker").get("id"))
+
+        self.assertNotEqual(*marker_ids)
 
     def test_svg_chess_com_arrow_style(self):
         svg = chess.svg.board(

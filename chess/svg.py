@@ -594,7 +594,8 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "class": "circle",
             }))
         elif arrow_style == "lichess":
-            marker_id = f"arrowhead-{arrow_index}"
+            marker_color_id = base64.urlsafe_b64encode(color.encode("utf-8")).decode("ascii").rstrip("=")
+            marker_id = f"arrowhead-{marker_color_id}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
                 "id": marker_id,
                 "orient": "auto",
@@ -607,6 +608,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
             ET.SubElement(marker, "path", {
                 "d": "M0,0 V4 L3,2 Z",
                 "fill": color,
+                "class": "arrow lichess",
             })
 
             dx, dy = xhead - xtail, yhead - ytail
