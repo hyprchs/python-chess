@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
+import base64
 import math
-import re
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
@@ -15,8 +14,6 @@ from chess import Color, IntoSquareSet, Square
 
 SQUARE_SIZE = 45
 MARGIN = 20
-
-_PIECE_SETS: dict[str, dict[str, str]] = {}
 
 @lru_cache(maxsize=1)
 def available_piece_sets() -> list[str]:
@@ -220,172 +217,52 @@ def _coord(text: str, x: int, y: int, width: int, height: int, horizontal: bool,
 
 
 def _piece_code(piece: chess.Piece, *, piece_set: str) -> str:
-    """
-    Returns the piece "code", like ``wP`` or ``bN``, for the given piece.
-
-    The ``mono`` piece set is special in that its pieces are grayscale and
-    do not differentiate by color, so the color prefix is omitted (e.g. ``P``).
-    """
+    """Returns a filename stem like ``wP`` or ``bN`` for the piece."""
     if piece_set == "mono":
-        return chess.PIECE_SYMBOLS[piece.piece_type].upper()
-    return f"{chess.COLOR_NAMES[piece.color][0].lower()}{chess.PIECE_SYMBOLS[piece.piece_type].upper()}"
+        return piece.symbol().upper()
+    return f"{'w' if piece.color else 'b'}{piece.symbol().upper()}"
 
 
-def _piece_defs_id(piece: chess.Piece, *, piece_set: str) -> str:
-    """
-    Returns an ``id`` attribute for a piece SVG element that will be unique
-    within a generated board SVG.
+def _embedded_piece(piece_svg: str) -> ET.Element:
+    root = ET.fromstring(piece_svg)
+    view_box = root.get("viewBox")
+    if view_box is None:
+        view_box = f"0 0 {root.get('width')} {root.get('height')}"
 
-    For the ``mono`` piece set, the color prefix is omitted.
-    """
-    if piece_set == "mono":
-        return chess.PIECE_NAMES[piece.piece_type].lower()
-    return f"{chess.COLOR_NAMES[piece.color].lower()}-{chess.PIECE_NAMES[piece.piece_type].lower()}"
-
-
-_SVG_PRESENTATION_ATTRIBUTES = frozenset({
-    "alignment-baseline", "baseline-shift", "clip-path", "clip-rule", "color",
-    "color-interpolation", "color-rendering", "cursor", "direction", "display",
-    "dominant-baseline", "fill", "fill-opacity", "fill-rule", "filter", "flood-color",
-    "flood-opacity", "font-family", "font-size", "font-style", "font-variant", "font-weight",
-    "image-rendering", "letter-spacing", "marker-end", "marker-mid", "marker-start", "mask",
-    "opacity", "overflow", "paint-order", "pointer-events", "shape-rendering", "stop-color",
-    "stop-opacity", "stroke", "stroke-dasharray", "stroke-dashoffset", "stroke-linecap",
-    "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke-width", "style",
-    "text-anchor", "text-rendering", "unicode-bidi", "visibility", "word-spacing", "writing-mode",
-})
-
-_SVG_URL_REFERENCE_RE = re.compile(r"url\(\s*#([^)\s]+)\s*\)")
-
-
-def _parse_viewbox(view_box: str) -> tuple[float, float, float, float] | None:
-    parts = view_box.replace(",", " ").split()
-    if len(parts) != 4:
-        return None
     try:
-        min_x, min_y, width, height = (float(p) for p in parts)
-    except ValueError:
-        return None
-    if not all(math.isfinite(value) for value in (min_x, min_y, width, height)):
-        return None
-    if width <= 0 or height <= 0:
-        return None
-    return min_x, min_y, width, height
+        min_x, min_y, width, height = map(float, view_box.replace(",", " ").split())
+    except ValueError as error:
+        raise ValueError("piece SVG must have a valid viewBox or numeric width and height") from error
+
+    if root.get("viewBox") is None or min_x or min_y:
+        if min_x or min_y:
+            namespace, separator, _ = root.tag.rpartition("}")
+            group_tag = f"{namespace}}}g" if separator else "g"
+            group = ET.Element(group_tag, {"transform": f"translate({-min_x:g} {-min_y:g})"})
+            group.extend(list(root))
+            root[:] = [group]
+        root.set("viewBox", f"0 0 {width:g} {height:g}")
+        piece_svg_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    else:
+        piece_svg_bytes = piece_svg.encode("utf-8")
+
+    data = base64.b64encode(piece_svg_bytes).decode("ascii")
+    href = f"data:image/svg+xml;base64,{data}"
+    return ET.Element("image", {
+        "width": str(SQUARE_SIZE),
+        "height": str(SQUARE_SIZE),
+        "href": href,
+        "xlink:href": href,
+    })
 
 
-def _parse_svg_length(length: Optional[str]) -> Optional[float]:
-    if length is None:
-        return None
-    try:
-        value = float(length)
-    except ValueError:
-        return None
-    return value if math.isfinite(value) and value > 0 else None
-
-
-def _parse_piece_viewbox(svg_element: ET.Element) -> tuple[float, float, float, float]:
-    if not svg_element.tag.endswith("svg"):
-        raise ValueError("piece SVG root must be an <svg> element")
-
-    view_box = svg_element.get("viewBox")
-    if view_box is not None:
-        parsed = _parse_viewbox(view_box)
-        if parsed is not None:
-            return parsed
-        raise ValueError("piece SVG has an invalid viewBox")
-
-    width = _parse_svg_length(svg_element.get("width"))
-    height = _parse_svg_length(svg_element.get("height"))
-    if width is None or height is None:
-        raise ValueError("piece SVG must have a viewBox or numeric width and height")
-    return 0, 0, width, height
-
-
-def _scope_svg_identifiers(svg_element: ET.Element, prefix: str) -> None:
-    id_map = {
-        element.get("id"): f"{prefix}-{element.get('id')}"
-        for element in svg_element.iter()
-        if element is not svg_element and element.get("id")
-    }
-    class_map = {
-        class_name: f"{prefix}-{class_name}"
-        for element in svg_element.iter()
-        for class_name in element.get("class", "").split()
-    }
-    class_reference_re = re.compile(
-        r"(?<![a-zA-Z0-9_-])\.(%s)(?![a-zA-Z0-9_-])" %
-        "|".join(re.escape(class_name) for class_name in class_map),
-    ) if class_map else None
-
-    def replace_url_reference(match: re.Match[str]) -> str:
-        identifier = match.group(1)
-        return f"url(#{id_map.get(identifier, identifier)})"
-
-    def replace_class_reference(match: re.Match[str]) -> str:
-        class_name = match.group(1)
-        return f".{class_map[class_name]}"
-
-    for element in svg_element.iter():
-        identifier = element.get("id")
-        if identifier in id_map:
-            element.set("id", id_map[identifier])
-
-        classes = element.get("class")
-        if classes:
-            element.set("class", " ".join(class_map[class_name] for class_name in classes.split()))
-
-        for attribute, value in element.attrib.items():
-            if attribute == "id":
-                continue
-            if attribute.rsplit("}", 1)[-1] == "href" and value.startswith("#"):
-                element.set(attribute, f"#{id_map.get(value[1:], value[1:])}")
-            elif "url(#" in value:
-                element.set(attribute, _SVG_URL_REFERENCE_RE.sub(replace_url_reference, value))
-
-        if element.tag.endswith("style") and element.text:
-            element.text = _SVG_URL_REFERENCE_RE.sub(replace_url_reference, element.text)
-            if class_reference_re is not None:
-                element.text = class_reference_re.sub(replace_class_reference, element.text)
-
-
-def _normalize_piece_svg(svg_element: ET.Element, *, id_prefix: Optional[str] = None) -> ET.Element:
-    """
-    Converts an external piece SVG into a <g> element that fits into the
-    45x45 square used by python-chess SVG boards.
-
-    Many piece sets use arbitrary viewBox sizes (e.g. 2048x2048). If we embed
-    the raw <svg> directly in <defs> and <use> it, it renders at the wrong
-    scale. Normalizing here makes piece rendering consistent across sets and
-    scopes local identifiers for a shared board SVG.
-    """
-    min_x, min_y, width, height = _parse_piece_viewbox(svg_element)
-    if id_prefix is not None:
-        _scope_svg_identifiers(svg_element, id_prefix)
-
-    # Preserve aspect ratio: fit the larger dimension to the square and center.
-    scale = SQUARE_SIZE / max(width, height)
-    dx = -min_x * scale + (SQUARE_SIZE - width * scale) / 2
-    dy = -min_y * scale + (SQUARE_SIZE - height * scale) / 2
-
-    wrapper = ET.Element("g")
-    wrapper.set("transform", f"translate({dx:.6f},{dy:.6f}) scale({scale:.6f})")
-    for attribute, value in svg_element.attrib.items():
-        if attribute in _SVG_PRESENTATION_ATTRIBUTES:
-            wrapper.set(attribute, value)
-    wrapper.extend(list(svg_element))
-    return wrapper
-
-
+@lru_cache(maxsize=None)
 def load_pieces(piece_set: str) -> dict[str, str]:
     """
     Loads piece SVGs from ``chess/piece/<piece_set>``, caching results in-process.
     """
-    if piece_set in _PIECE_SETS:
-        return _PIECE_SETS[piece_set]
-
-    this_dir = os.path.dirname(os.path.realpath(__file__))
-    piece_set_dir = os.path.join(this_dir, "piece", piece_set)
-    if not os.path.isdir(piece_set_dir):
+    piece_set_dir = Path(__file__).resolve().parent / "piece" / piece_set
+    if not piece_set_dir.is_dir():
         raise FileNotFoundError(f"Piece set not found: {piece_set!r}")
 
     pieces: dict[str, str] = {}
@@ -397,11 +274,8 @@ def load_pieces(piece_set: str) -> dict[str, str]:
                 # This should only happen for `piece_set == 'mono'`.
                 continue
 
-            piece_svg_file = os.path.join(piece_set_dir, f"{piece_code}.svg")
-            with open(piece_svg_file, "r", encoding="utf-8") as f:
-                pieces[piece_code] = f.read()
+            pieces[piece_code] = (piece_set_dir / f"{piece_code}.svg").read_text(encoding="utf-8")
 
-    _PIECE_SETS[piece_set] = pieces
     return pieces
 
 
@@ -421,10 +295,7 @@ def piece(piece: chess.Piece, size: Optional[int] = None, *, piece_set: Optional
     if piece_set is None:
         svg.append(ET.fromstring(PIECES[piece.symbol()]))
     else:
-        piece_code = _piece_code(piece, piece_set=piece_set)
-        piece_svg = load_pieces(piece_set)[piece_code]
-        piece_element = ET.fromstring(piece_svg)
-        svg.append(_normalize_piece_svg(piece_element, id_prefix=piece_code))
+        svg.append(_embedded_piece(load_pieces(piece_set)[_piece_code(piece, piece_set=piece_set)]))
     return SvgWrapper(ET.tostring(svg).decode("utf-8"))
 
 
@@ -510,23 +381,11 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                         defs.append(ET.fromstring(PIECES[chess.Piece(piece_type, piece_color).symbol()]))
         else:
             pieces = load_pieces(piece_set)
-            existing_piece_defs: set[str] = set()
-            for piece_color in chess.COLORS:
-                for piece_type in chess.PIECE_TYPES:
-                    if not board.pieces_mask(piece_type, piece_color):
-                        continue
-                    piece = chess.Piece(piece_type, piece_color)
-                    piece_code = _piece_code(piece, piece_set=piece_set)
-                    piece_defs_id = _piece_defs_id(piece, piece_set=piece_set)
-                    if piece_defs_id in existing_piece_defs:
-                        continue
-
-                    svg_content = pieces[piece_code]
-                    svg_element = ET.fromstring(svg_content)
-                    normalized = _normalize_piece_svg(svg_element, id_prefix=piece_code)
-                    normalized.set("id", piece_defs_id)
-                    defs.append(normalized)
-                    existing_piece_defs.add(piece_defs_id)
+            piece_codes = sorted({_piece_code(piece, piece_set=piece_set) for piece in board.piece_map().values()})
+            for piece_code in piece_codes:
+                piece_image = _embedded_piece(pieces[piece_code])
+                piece_image.set("id", f"piece-{piece_code}")
+                defs.append(piece_image)
 
     squares = chess.SquareSet(squares) if squares else chess.SquareSet()
     if squares:
@@ -659,7 +518,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 if piece_set is None:
                     href = f"#{chess.COLOR_NAMES[piece.color]}-{chess.PIECE_NAMES[piece.piece_type]}"
                 else:
-                    href = f"#{_piece_defs_id(piece, piece_set=piece_set)}"
+                    href = f"#piece-{_piece_code(piece, piece_set=piece_set)}"
                 ET.SubElement(svg, "use", {
                     "href": href,
                     "xlink:href": href,
