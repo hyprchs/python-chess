@@ -8,12 +8,15 @@ from pathlib import Path
 
 import chess
 
-from typing import Dict, Iterable, Optional, Tuple, Union
+from typing import Dict, Iterable, Literal, Optional, Tuple, Union
 from chess import Color, IntoSquareSet, Square
 
 
 SQUARE_SIZE = 45
 MARGIN = 20
+
+ArrowStyle = Literal["lichess", "chess.com"]
+
 
 @lru_cache(maxsize=1)
 def available_piece_sets() -> list[str]:
@@ -79,6 +82,15 @@ DEFAULT_COLORS = {
     "arrow red": "#88202080",
     "arrow yellow": "#e68f00b3",
     "arrow blue": "#00308880",
+}
+
+CHESS_COM_ARROW_COLORS = {
+    # Chess.com applies both an alpha of 0.8 to the fill and an opacity of 0.8
+    # to the polygon. These alpha values preserve the resulting appearance.
+    "arrow green": "#9fcf3fa3",
+    "arrow red": "#f8553fa3",
+    "arrow yellow": "#ffaa00a3",
+    "arrow blue": "#48c1f9a3",
 }
 
 
@@ -304,6 +316,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           lastmove: Optional[chess.Move] = None,
           check: Optional[Square] = None,
           arrows: Iterable[Union[Arrow, Tuple[Square, Square]]] = [],
+          arrow_style: ArrowStyle = "lichess",
           fill: Dict[Square, str] = {},
           squares: Optional[IntoSquareSet] = None,
           size: Optional[int] = None,
@@ -324,6 +337,10 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         ``[chess.svg.Arrow(chess.E2, chess.E4)]``, or a list of tuples, like
         ``[(chess.E2, chess.E4)]``. An arrow from a square pointing to the same
         square is drawn as a circle, like ``[(chess.E2, chess.E2)]``.
+    :param arrow_style: The arrow geometry and default palette. ``"lichess"``
+        (the default) uses rounded shafts with triangular markers, matching
+        Chessground. ``"chess.com"`` uses filled polygons and renders knight
+        moves as L-shaped arrows.
     :param fill: A dictionary mapping squares to a colors that they should be
         filled with.
     :param squares: A :class:`chess.SquareSet` with selected squares to mark
@@ -357,6 +374,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
     .. image:: ../docs/Ne4.svg
         :alt: 8/8/8/8/4N3/8/8/8
     """
+    if arrow_style not in ["lichess", "chess.com"]:
+        raise ValueError(f"unsupported arrow style: {arrow_style!r}")
+
     inner_border = 1 if borders and coordinates else 0
     outer_border = 1 if borders else 0
     margin = 15 if coordinates else 0
@@ -535,17 +555,22 @@ def board(board: Optional[chess.BaseBoard] = None, *,
             }))
 
     # Render arrows.
-    for arrow in arrows:
+    for arrow_index, arrow in enumerate(arrows):
         try:
-            tail, head, color = arrow.tail, arrow.head, arrow.color  # type: ignore
+            tail, head, arrow_color = arrow.tail, arrow.head, arrow.color  # type: ignore
         except AttributeError:
             tail, head = arrow  # type: ignore
-            color = "green"
+            arrow_color = "green"
 
-        try:
-            color, opacity = _select_color(colors, " ".join(["arrow", color]))
-        except KeyError:
-            opacity = 1.0
+        color_key = " ".join(["arrow", arrow_color])
+        if color_key in colors:
+            color, opacity = _color(colors[color_key])
+        elif arrow_style == "chess.com" and color_key in CHESS_COM_ARROW_COLORS:
+            color, opacity = _color(CHESS_COM_ARROW_COLORS[color_key])
+        elif color_key in DEFAULT_COLORS:
+            color, opacity = _color(DEFAULT_COLORS[color_key])
+        else:
+            color, opacity = _color(arrow_color)
 
         tail_file = chess.square_file(tail)
         tail_rank = chess.square_rank(tail)
@@ -568,42 +593,97 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "fill": "none",
                 "class": "circle",
             }))
-        else:
-            marker_size = 0.75 * SQUARE_SIZE
-            marker_margin = 0.1 * SQUARE_SIZE
+        elif arrow_style == "lichess":
+            marker_id = f"arrowhead-{arrow_index}"
+            marker = ET.SubElement(defs, "marker", {
+                "id": marker_id,
+                "orient": "auto",
+                "overflow": "visible",
+                "markerWidth": "4",
+                "markerHeight": "4",
+                "refX": "2.05",
+                "refY": "2",
+            })
+            ET.SubElement(marker, "path", {
+                "d": "M0,0 V4 L3,2 Z",
+                "fill": color,
+            })
 
             dx, dy = xhead - xtail, yhead - ytail
             hypot = math.hypot(dx, dy)
-
-            shaft_x = xhead - dx * (marker_size + marker_margin) / hypot
-            shaft_y = yhead - dy * (marker_size + marker_margin) / hypot
-
-            xtip = xhead - dx * marker_margin / hypot
-            ytip = yhead - dy * marker_margin / hypot
+            margin = SQUARE_SIZE * 10 / 64
 
             ET.SubElement(svg, "line", _attrs({
                 "x1": xtail,
                 "y1": ytail,
-                "x2": shaft_x,
-                "y2": shaft_y,
+                "x2": xhead - dx * margin / hypot,
+                "y2": yhead - dy * margin / hypot,
                 "stroke": color,
                 "opacity": opacity if opacity < 1.0 else None,
-                "stroke-width": SQUARE_SIZE * 0.2,
-                "stroke-linecap": "butt",
-                "class": "arrow",
+                "stroke-width": SQUARE_SIZE * 10 / 64,
+                "stroke-linecap": "round",
+                "marker-end": f"url(#{marker_id})",
+                "class": "arrow lichess",
             }))
+        else:
+            tail_gap = SQUARE_SIZE * 0.36
+            shaft_half_width = SQUARE_SIZE * 0.11
+            head_length = SQUARE_SIZE * 0.36
+            head_half_width = SQUARE_SIZE * 0.26
 
-            marker = [(xtip, ytip),
-                      (shaft_x + dy * 0.5 * marker_size / hypot,
-                       shaft_y - dx * 0.5 * marker_size / hypot),
-                      (shaft_x - dy * 0.5 * marker_size / hypot,
-                       shaft_y + dx * 0.5 * marker_size / hypot)]
+            dx, dy = xhead - xtail, yhead - ytail
+            if (abs(head_file - tail_file), abs(head_rank - tail_rank)) in [(1, 2), (2, 1)]:
+                if abs(dx) > abs(dy):
+                    ux, uy = math.copysign(1.0, dx), 0.0
+                    vx, vy = 0.0, math.copysign(1.0, dy)
+                else:
+                    ux, uy = 0.0, math.copysign(1.0, dy)
+                    vx, vy = math.copysign(1.0, dx), 0.0
+
+                major_length = 2 * SQUARE_SIZE
+                points = [
+                    (xtail + ux * tail_gap - vx * shaft_half_width,
+                     ytail + uy * tail_gap - vy * shaft_half_width),
+                    (xtail + ux * (major_length + shaft_half_width) - vx * shaft_half_width,
+                     ytail + uy * (major_length + shaft_half_width) - vy * shaft_half_width),
+                    (xhead - vx * head_length + ux * shaft_half_width,
+                     yhead - vy * head_length + uy * shaft_half_width),
+                    (xhead - vx * head_length + ux * head_half_width,
+                     yhead - vy * head_length + uy * head_half_width),
+                    (xhead, yhead),
+                    (xhead - vx * head_length - ux * head_half_width,
+                     yhead - vy * head_length - uy * head_half_width),
+                    (xhead - vx * head_length - ux * shaft_half_width,
+                     yhead - vy * head_length - uy * shaft_half_width),
+                    (xtail + ux * (major_length - shaft_half_width) + vx * shaft_half_width,
+                     ytail + uy * (major_length - shaft_half_width) + vy * shaft_half_width),
+                    (xtail + ux * tail_gap + vx * shaft_half_width,
+                     ytail + uy * tail_gap + vy * shaft_half_width),
+                ]
+            else:
+                hypot = math.hypot(dx, dy)
+                ux, uy = dx / hypot, dy / hypot
+                px, py = -uy, ux
+                shaft_start_x = xtail + ux * tail_gap
+                shaft_start_y = ytail + uy * tail_gap
+                arrowhead_x = xhead - ux * head_length
+                arrowhead_y = yhead - uy * head_length
+
+                points = [
+                    (shaft_start_x + px * shaft_half_width, shaft_start_y + py * shaft_half_width),
+                    (arrowhead_x + px * shaft_half_width, arrowhead_y + py * shaft_half_width),
+                    (arrowhead_x + px * head_half_width, arrowhead_y + py * head_half_width),
+                    (xhead, yhead),
+                    (arrowhead_x - px * head_half_width, arrowhead_y - py * head_half_width),
+                    (arrowhead_x - px * shaft_half_width, arrowhead_y - py * shaft_half_width),
+                    (shaft_start_x - px * shaft_half_width, shaft_start_y - py * shaft_half_width),
+                ]
 
             ET.SubElement(svg, "polygon", _attrs({
-                "points": " ".join(f"{x},{y}" for x, y in marker),
+                "points": " ".join(f"{x:g},{y:g}" for x, y in points),
                 "fill": color,
                 "opacity": opacity if opacity < 1.0 else None,
-                "class": "arrow",
+                "class": "arrow chess-com",
             }))
 
     return SvgWrapper(ET.tostring(svg).decode("utf-8"))

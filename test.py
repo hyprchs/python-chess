@@ -4407,6 +4407,70 @@ class SvgTestCase(unittest.TestCase):
         self.assertNotIn("<circle", svg)
         self.assertIn("<line", svg)
 
+    def test_svg_lichess_arrow_style(self):
+        svg = chess.svg.board(
+            arrows=[chess.svg.Arrow(chess.E2, chess.E4)],
+            arrow_style="lichess",
+            coordinates=False,
+        )
+        root = chess.svg.ET.fromstring(svg)
+        namespace = "{http://www.w3.org/2000/svg}"
+        marker = root.find(f".//{namespace}marker")
+        line = root.find(f".//{namespace}line")
+
+        self.assertIsNotNone(marker)
+        self.assertEqual(marker.get("refX"), "2.05")
+        self.assertEqual(marker.find(f"{namespace}path").get("d"), "M0,0 V4 L3,2 Z")
+        self.assertIsNotNone(line)
+        self.assertEqual(line.get("class"), "arrow lichess")
+        self.assertEqual(line.get("stroke-linecap"), "round")
+        self.assertEqual(float(line.get("stroke-width")), chess.svg.SQUARE_SIZE * 10 / 64)
+        self.assertEqual(line.get("marker-end"), "url(#arrowhead-0)")
+
+    def test_svg_chess_com_arrow_style(self):
+        svg = chess.svg.board(
+            arrows=[chess.svg.Arrow(chess.E2, chess.E4)],
+            arrow_style="chess.com",
+            coordinates=False,
+        )
+        root = chess.svg.ET.fromstring(svg)
+        namespace = "{http://www.w3.org/2000/svg}"
+        polygon = root.find(f".//{namespace}polygon")
+        points = [tuple(map(float, point.split(","))) for point in polygon.get("points").split()]
+
+        self.assertEqual(polygon.get("class"), "arrow chess-com")
+        self.assertEqual(polygon.get("fill"), "#9fcf3f")
+        self.assertEqual(len(points), 7)
+        self.assertEqual(points[3], (4.5 * chess.svg.SQUARE_SIZE, 4.5 * chess.svg.SQUARE_SIZE))
+
+    def test_svg_chess_com_knight_arrow(self):
+        svg = chess.svg.board(
+            arrows=[chess.svg.Arrow(chess.B1, chess.C3)],
+            arrow_style="chess.com",
+            coordinates=False,
+        )
+        root = chess.svg.ET.fromstring(svg)
+        namespace = "{http://www.w3.org/2000/svg}"
+        polygon = root.find(f".//{namespace}polygon")
+        points = [tuple(map(float, point.split(","))) for point in polygon.get("points").split()]
+
+        self.assertEqual(len(points), 9)
+        self.assertEqual(points[4], (2.5 * chess.svg.SQUARE_SIZE, 5.5 * chess.svg.SQUARE_SIZE))
+
+    def test_svg_arrow_style_color_override(self):
+        svg = chess.svg.board(
+            arrows=[chess.svg.Arrow(chess.E2, chess.E4)],
+            arrow_style="chess.com",
+            colors={"arrow green": "#01020304"},
+        )
+
+        self.assertIn('fill="#010203"', svg)
+        self.assertIn(f'opacity="{4 / 255}"', svg)
+
+    def test_svg_rejects_unknown_arrow_style(self):
+        with self.assertRaisesRegex(ValueError, "unsupported arrow style"):
+            chess.svg.board(arrow_style="unknown")  # type: ignore
+
     def test_svg_piece(self):
         svg = chess.svg.piece(chess.Piece.from_symbol("K"))
         self.assertIn("id=\"white-king\"", svg)
