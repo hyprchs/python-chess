@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import math
+import uuid
 import xml.etree.ElementTree as ET
 from functools import lru_cache
 from pathlib import Path
@@ -554,6 +555,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "y": y,
             }))
 
+    # Namespace marker IDs so multiple inline boards do not share definitions.
+    marker_namespace = uuid.uuid4().hex
+
     # Render arrows.
     for arrow_index, arrow in enumerate(arrows):
         try:
@@ -594,8 +598,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "class": "circle",
             }))
         elif arrow_style == "lichess":
-            marker_color_id = base64.urlsafe_b64encode(color.encode("utf-8")).decode("ascii").rstrip("=")
-            marker_id = f"arrowhead-{marker_color_id}-{arrow_index}"
+            marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
                 "id": marker_id,
                 "orient": "auto",

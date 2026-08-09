@@ -4429,11 +4429,11 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(float(line.get("stroke-width")), chess.svg.SQUARE_SIZE * 10 / 64)
         self.assertEqual(line.get("marker-end"), f"url(#{marker.get('id')})")
 
-    def test_svg_lichess_arrow_marker_ids_include_color(self):
+    def test_svg_lichess_arrow_marker_ids_are_unique_across_boards(self):
         namespace = "{http://www.w3.org/2000/svg}"
         marker_ids = []
-        for color in ["green", "red"]:
-            svg = chess.svg.board(arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)])
+        for _ in range(2):
+            svg = chess.svg.board(arrows=[chess.svg.Arrow(chess.E2, chess.E4)])
             root = chess.svg.ET.fromstring(svg)
             marker_ids.append(root.find(f".//{namespace}marker").get("id"))
 
