@@ -4483,6 +4483,74 @@ class SvgTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported arrow style"):
             chess.svg.board(arrow_style="unknown")  # type: ignore
 
+    def test_svg_legal_destinations_and_annotations(self):
+        board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
+        rendered = chess.svg.board_with_annotations(
+            board,
+            coordinates=False,
+            legal_moves=[chess.Move.from_uci("e4d6"), chess.Move.from_uci("e4f6")],
+            legal_move_style="lichess",
+            user_highlights=[chess.svg.UserHighlight(chess.E4, "red", "chess.com")],
+        )
+
+        self.assertIn('class="legal-destination lichess dot"', rendered.svg)
+        self.assertIn('class="legal-destination lichess capture"', rendered.svg)
+        self.assertIn('class="user-highlight chess.com"', rendered.svg)
+        self.assertEqual(
+            [annotation.kind for annotation in rendered.annotations],
+            ["legal_destination_dot", "legal_destination_capture", "user_highlight"],
+        )
+        self.assertEqual(rendered.annotations[-1].color, "red")
+        self.assertEqual(rendered.viewbox_size, 8 * chess.svg.SQUARE_SIZE)
+        # Legal markers must be behind the target piece.
+        self.assertLess(
+            rendered.svg.index('class="legal-destination lichess capture"'),
+            rendered.svg.index('href="#black-pawn"'),
+        )
+
+    def test_svg_chess_com_legal_destinations_match_live_geometry(self):
+        board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
+        rendered = chess.svg.board_with_annotations(
+            board,
+            coordinates=False,
+            legal_moves=[chess.Move.from_uci("e4d6"), chess.Move.from_uci("e4f6")],
+            legal_move_style="chess.com",
+        )
+
+        root = chess.svg.ET.fromstring(rendered.svg)
+        namespace = "{http://www.w3.org/2000/svg}"
+        dots = root.findall(f".//{namespace}circle[@class='legal-destination chess-com dot']")
+        captures = root.findall(
+            f".//{namespace}circle[@class='legal-destination chess-com capture']"
+        )
+        self.assertEqual(len(dots), 1)
+        self.assertEqual(len(captures), 1)
+        self.assertEqual(float(dots[0].get("r")), chess.svg.SQUARE_SIZE * 0.164)
+        self.assertEqual(float(captures[0].get("stroke-width")), chess.svg.SQUARE_SIZE * 0.088)
+        self.assertEqual(captures[0].get("opacity"), "0.14")
+
+    def test_svg_en_passant_destination_is_a_dot(self):
+        board = chess.Board("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")
+        rendered = chess.svg.board_with_annotations(
+            board,
+            coordinates=False,
+            legal_moves=[chess.Move.from_uci("e5d6")],
+        )
+        self.assertEqual(rendered.annotations[0].kind, "legal_destination_dot")
+
+    def test_svg_rejects_invalid_legal_destinations(self):
+        board = chess.Board()
+        with self.assertRaisesRegex(ValueError, "share one source square"):
+            chess.svg.board_with_annotations(
+                board,
+                legal_moves=[chess.Move.from_uci("e2e4"), chess.Move.from_uci("d2d4")],
+            )
+        with self.assertRaisesRegex(ValueError, "illegal move"):
+            chess.svg.board_with_annotations(
+                board,
+                legal_moves=[chess.Move.from_uci("e2e5")],
+            )
+
     def test_svg_piece(self):
         svg = chess.svg.piece(chess.Piece.from_symbol("K"))
         self.assertIn("id=\"white-king\"", svg)
