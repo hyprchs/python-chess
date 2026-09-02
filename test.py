@@ -4439,6 +4439,29 @@ class SvgTestCase(unittest.TestCase):
 
         self.assertNotEqual(*marker_ids)
 
+    def test_svg_lichess_arrows_share_one_opacity_layer(self):
+        rendered = chess.svg.board_with_annotations(
+            arrows=[
+                chess.svg.Arrow(chess.E2, chess.E4),
+                chess.svg.Arrow(chess.E3, chess.E5),
+            ],
+            coordinates=False,
+        )
+        root = chess.svg.ET.fromstring(rendered.svg)
+        namespace = "{http://www.w3.org/2000/svg}"
+        layer = root.find(f".//{namespace}g[@class='shapes lichess']")
+        self.assertIsNotNone(layer)
+        self.assertEqual(layer.get("opacity"), "0.6")
+        lines = layer.findall(f"{namespace}line")
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(line.get("stroke") == "#15781B" for line in lines))
+        self.assertTrue(all(line.get("opacity") is None for line in lines))
+
+        arrow = rendered.annotations[0]
+        self.assertEqual(arrow.tail_xy, (4.5 * chess.svg.SQUARE_SIZE, 6.5 * chess.svg.SQUARE_SIZE))
+        self.assertEqual(arrow.head_xy, (4.5 * chess.svg.SQUARE_SIZE, 4.5 * chess.svg.SQUARE_SIZE))
+        self.assertLess(arrow.bbox_xyxy[2] - arrow.bbox_xyxy[0], chess.svg.SQUARE_SIZE)
+
     def test_svg_chess_com_arrow_style(self):
         svg = chess.svg.board(
             arrows=[chess.svg.Arrow(chess.E2, chess.E4)],
@@ -4506,6 +4529,20 @@ class SvgTestCase(unittest.TestCase):
         self.assertLess(
             rendered.svg.index('class="legal-destination lichess capture"'),
             rendered.svg.index('href="#black-pawn"'),
+        )
+
+        root = chess.svg.ET.fromstring(rendered.svg)
+        namespace = "{http://www.w3.org/2000/svg}"
+        capture = root.find(
+            f".//{namespace}rect[@class='legal-destination lichess capture']"
+        )
+        self.assertIsNotNone(capture)
+        gradient_id = capture.get("fill")[5:-1]
+        gradient = root.find(f".//{namespace}radialGradient[@id='{gradient_id}']")
+        stops = gradient.findall(f"{namespace}stop")
+        self.assertEqual(
+            [(stop.get("offset"), stop.get("stop-opacity")) for stop in stops],
+            [("0%", "0"), ("80%", "0"), ("80%", "0.3"), ("100%", "0.3")],
         )
 
     def test_svg_chess_com_legal_destinations_match_live_geometry(self):

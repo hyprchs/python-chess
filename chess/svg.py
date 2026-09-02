@@ -49,6 +49,8 @@ class OverlayAnnotation:
     ]
     bbox_xyxy: Tuple[float, float, float, float]
     color: CanonicalOverlayColor | None = None
+    tail_xy: Tuple[float, float] | None = None
+    head_xy: Tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,13 @@ CHESS_COM_ARROW_COLORS = {
     "arrow red": "#f8553fa3",
     "arrow yellow": "#ffaa00a3",
     "arrow blue": "#48c1f9a3",
+}
+
+LICHESS_ARROW_COLORS = {
+    "arrow green": "#15781B",
+    "arrow red": "#882020",
+    "arrow yellow": "#e68f00",
+    "arrow blue": "#003088",
 }
 
 
@@ -308,25 +317,65 @@ def _arrow_bbox(
     board_offset: int,
     arrow_style: ArrowStyle,
 ) -> Tuple[float, float, float, float]:
-    """Conservative primitive bounds from the arrow geometry's own dimensions."""
+    """Bounds of the arrowhead, which is the detector's arrow anchor."""
     xtail, ytail = _square_center(tail, orientation=orientation, board_offset=board_offset)
     xhead, yhead = _square_center(head, orientation=orientation, board_offset=board_offset)
     if tail == head:
         return _box_from_center(xhead, yhead, SQUARE_SIZE / 2)
+
+    dx, dy = xhead - xtail, yhead - ytail
     if arrow_style == "lichess":
-        extent = SQUARE_SIZE * 0.26
-        return (
-            min(xtail, xhead) - extent,
-            min(ytail, yhead) - extent,
-            max(xtail, xhead) + extent,
-            max(ytail, yhead) + extent,
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        stroke_width = SQUARE_SIZE * 10 / 64
+        line_end_x = xhead - ux * stroke_width
+        line_end_y = yhead - uy * stroke_width
+        points = (
+            (line_end_x - ux * 2.05 * stroke_width - px * 2 * stroke_width,
+             line_end_y - uy * 2.05 * stroke_width - py * 2 * stroke_width),
+            (line_end_x - ux * 2.05 * stroke_width + px * 2 * stroke_width,
+             line_end_y - uy * 2.05 * stroke_width + py * 2 * stroke_width),
+            (line_end_x + ux * 0.95 * stroke_width,
+             line_end_y + uy * 0.95 * stroke_width),
         )
-    extent = SQUARE_SIZE * 0.26
+    else:
+        head_length = SQUARE_SIZE * 0.36
+        head_half_width = SQUARE_SIZE * 0.26
+        if (
+            abs(chess.square_file(head) - chess.square_file(tail)),
+            abs(chess.square_rank(head) - chess.square_rank(tail)),
+        ) in [(1, 2), (2, 1)]:
+            if abs(dx) > abs(dy):
+                ux, uy = math.copysign(1.0, dx), 0.0
+                vx, vy = 0.0, math.copysign(1.0, dy)
+            else:
+                ux, uy = 0.0, math.copysign(1.0, dy)
+                vx, vy = math.copysign(1.0, dx), 0.0
+            points = (
+                (xhead - vx * head_length + ux * head_half_width,
+                 yhead - vy * head_length + uy * head_half_width),
+                (xhead, yhead),
+                (xhead - vx * head_length - ux * head_half_width,
+                 yhead - vy * head_length - uy * head_half_width),
+            )
+        else:
+            length = math.hypot(dx, dy)
+            ux, uy = dx / length, dy / length
+            px, py = -uy, ux
+            points = (
+                (xhead - ux * head_length + px * head_half_width,
+                 yhead - uy * head_length + py * head_half_width),
+                (xhead, yhead),
+                (xhead - ux * head_length - px * head_half_width,
+                 yhead - uy * head_length - py * head_half_width),
+            )
+
     return (
-        min(xtail, xhead) - extent,
-        min(ytail, yhead) - extent,
-        max(xtail, xhead) + extent,
-        max(ytail, yhead) + extent,
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
     )
 
 
@@ -546,6 +595,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
     if legal_move_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported legal move style: {legal_move_style!r}")
     legal_destinations = _normalize_legal_moves(board, legal_moves)
+    arrows = tuple(arrows)
     highlights = tuple(user_highlights)
     if any(not isinstance(highlight, UserHighlight) for highlight in highlights):
         raise TypeError("user_highlights must contain UserHighlight values")
@@ -718,19 +768,32 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 }))
                 bbox = _box_from_center(cx, cy, radius)
             else:
-                radius = SQUARE_SIZE * 0.45
-                stroke_width = SQUARE_SIZE * 0.10
-                ET.SubElement(svg, "circle", _attrs({
-                    "cx": cx,
-                    "cy": cy,
-                    "r": radius,
-                    "fill": "none",
-                    "stroke": "#145500",
-                    "stroke-width": stroke_width,
-                    "opacity": 0.3,
+                x, y = _square_origin(
+                    move.to_square, orientation=orientation, board_offset=board_offset
+                )
+                gradient_id = f"legal-capture-{uuid.uuid4().hex}"
+                gradient = ET.SubElement(defs, "radialGradient", {"id": gradient_id})
+                ET.SubElement(gradient, "stop", {
+                    "offset": "0%", "stop-color": "#145500", "stop-opacity": "0",
+                })
+                ET.SubElement(gradient, "stop", {
+                    "offset": "80%", "stop-color": "#145500", "stop-opacity": "0",
+                })
+                ET.SubElement(gradient, "stop", {
+                    "offset": "80%", "stop-color": "#145500", "stop-opacity": "0.3",
+                })
+                ET.SubElement(gradient, "stop", {
+                    "offset": "100%", "stop-color": "#145500", "stop-opacity": "0.3",
+                })
+                ET.SubElement(svg, "rect", _attrs({
+                    "x": x,
+                    "y": y,
+                    "width": SQUARE_SIZE,
+                    "height": SQUARE_SIZE,
+                    "fill": f"url(#{gradient_id})",
                     "class": "legal-destination lichess capture",
                 }))
-                bbox = _box_from_center(cx, cy, radius + stroke_width / 2)
+                bbox = (x, y, x + SQUARE_SIZE, y + SQUARE_SIZE)
         elif kind == "legal_destination_dot":
             # Chess.com's .hint uses 4.2% board-width padding. At eight files
             # this leaves a radius of (1 - 2 * .336) / 2 = .164 squares.
@@ -790,6 +853,13 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 "y": y,
             }))
 
+    lichess_shapes = (
+        ET.SubElement(svg, "g", {"class": "shapes lichess", "opacity": "0.6"})
+        if any(highlight.palette == "lichess" for highlight in highlights)
+        or (arrow_style == "lichess" and bool(arrows))
+        else None
+    )
+
     # User highlights are foreground circles, matching Lichess's annotated
     # square geometry. The palette intentionally changes only color, never
     # the class geometry.
@@ -798,13 +868,13 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             highlight.square, orientation=orientation, board_offset=board_offset
         )
         color_key = f"arrow {highlight.color}"
-        palette = (
-            CHESS_COM_ARROW_COLORS if highlight.palette == "chess.com" else DEFAULT_COLORS
-        )
+        palette = CHESS_COM_ARROW_COLORS if highlight.palette == "chess.com" else LICHESS_ARROW_COLORS
         color, opacity = _color(palette[color_key])
+        parent = svg if highlight.palette == "chess.com" else lichess_shapes
+        assert parent is not None
         radius = SQUARE_SIZE * 0.45
         stroke_width = SQUARE_SIZE * 0.10
-        ET.SubElement(svg, "circle", _attrs({
+        ET.SubElement(parent, "circle", _attrs({
             "cx": cx,
             "cy": cy,
             "r": radius,
@@ -834,10 +904,15 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             arrow_color = "green"
 
         color_key = " ".join(["arrow", arrow_color])
+        arrow_parent = svg
         if color_key in colors:
             color, opacity = _color(colors[color_key])
         elif arrow_style == "chess.com" and color_key in CHESS_COM_ARROW_COLORS:
             color, opacity = _color(CHESS_COM_ARROW_COLORS[color_key])
+        elif arrow_style == "lichess" and color_key in LICHESS_ARROW_COLORS:
+            color, opacity = _color(LICHESS_ARROW_COLORS[color_key])
+            assert lichess_shapes is not None
+            arrow_parent = lichess_shapes
         elif color_key in DEFAULT_COLORS:
             color, opacity = _color(DEFAULT_COLORS[color_key])
         else:
@@ -854,7 +929,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         yhead = board_offset + (7.5 - head_rank if orientation else head_rank + 0.5) * SQUARE_SIZE
 
         if (head_file, head_rank) == (tail_file, tail_rank):
-            ET.SubElement(svg, "circle", _attrs({
+            ET.SubElement(arrow_parent, "circle", _attrs({
                 "cx": xhead,
                 "cy": yhead,
                 "r": SQUARE_SIZE * 0.9 / 2,
@@ -885,7 +960,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             hypot = math.hypot(dx, dy)
             margin = SQUARE_SIZE * 10 / 64
 
-            ET.SubElement(svg, "line", _attrs({
+            ET.SubElement(arrow_parent, "line", _attrs({
                 "x1": xtail,
                 "y1": ytail,
                 "x2": xhead - dx * margin / hypot,
@@ -951,7 +1026,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                     (shaft_start_x - px * shaft_half_width, shaft_start_y - py * shaft_half_width),
                 ]
 
-            ET.SubElement(svg, "polygon", _attrs({
+            ET.SubElement(arrow_parent, "polygon", _attrs({
                 "points": " ".join(f"{x:g},{y:g}" for x, y in points),
                 "fill": color,
                 "opacity": opacity if opacity < 1.0 else None,
@@ -972,6 +1047,8 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                     board_offset=board_offset,
                     arrow_style=arrow_style,
                 ),
+                tail_xy=(xtail, ytail),
+                head_xy=(xhead, yhead),
             )
         )
 
