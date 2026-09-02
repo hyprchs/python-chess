@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import logging
+import math
 import os
 import os.path
 import platform
@@ -4539,6 +4540,12 @@ class SvgTestCase(unittest.TestCase):
         self.assertIsNotNone(capture)
         gradient_id = capture.get("fill")[5:-1]
         gradient = root.find(f".//{namespace}radialGradient[@id='{gradient_id}']")
+        self.assertEqual(gradient.get("gradientUnits"), "userSpaceOnUse")
+        self.assertEqual(float(gradient.get("cx")), 5.5 * chess.svg.SQUARE_SIZE)
+        self.assertEqual(float(gradient.get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
+        self.assertAlmostEqual(
+            float(gradient.get("r")), chess.svg.SQUARE_SIZE / math.sqrt(2)
+        )
         stops = gradient.findall(f"{namespace}stop")
         self.assertEqual(
             [(stop.get("offset"), stop.get("stop-opacity")) for stop in stops],

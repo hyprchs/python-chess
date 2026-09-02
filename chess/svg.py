@@ -772,7 +772,16 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                     move.to_square, orientation=orientation, board_offset=board_offset
                 )
                 gradient_id = f"legal-capture-{uuid.uuid4().hex}"
-                gradient = ET.SubElement(defs, "radialGradient", {"id": gradient_id})
+                # CSS radial-gradient() defaults to farthest-corner. Match
+                # Chessground's 80% stop against that radius, not SVG's 50%
+                # object-bounding-box default.
+                gradient = ET.SubElement(defs, "radialGradient", _attrs({
+                    "id": gradient_id,
+                    "gradientUnits": "userSpaceOnUse",
+                    "cx": cx,
+                    "cy": cy,
+                    "r": SQUARE_SIZE / math.sqrt(2),
+                }))
                 ET.SubElement(gradient, "stop", {
                     "offset": "0%", "stop-color": "#145500", "stop-opacity": "0",
                 })
