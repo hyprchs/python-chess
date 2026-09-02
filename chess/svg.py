@@ -48,6 +48,7 @@ class OverlayAnnotation:
         "legal_destination_capture",
     ]
     bbox_xyxy: Tuple[float, float, float, float]
+    anchor_bbox_xyxy: Tuple[float, float, float, float] | None = None
     color: CanonicalOverlayColor | None = None
     tail_xy: Tuple[float, float] | None = None
     head_xy: Tuple[float, float] | None = None
@@ -385,6 +386,71 @@ def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, f
         max(point[0] for point in points),
         max(point[1] for point in points),
     )
+
+
+def _arrow_anchor_bbox(
+    tail: Square,
+    head: Square,
+    *,
+    orientation: Color,
+    board_offset: int,
+    arrow_style: ArrowStyle,
+) -> Tuple[float, float, float, float]:
+    """Bounds of the rendered arrowhead used as the pose detector anchor."""
+    xtail, ytail = _square_center(tail, orientation=orientation, board_offset=board_offset)
+    xhead, yhead = _square_center(head, orientation=orientation, board_offset=board_offset)
+    if tail == head:
+        return _box_from_center(xhead, yhead, SQUARE_SIZE / 2)
+
+    dx, dy = xhead - xtail, yhead - ytail
+    if arrow_style == "lichess":
+        length = math.hypot(dx, dy)
+        ux, uy = dx / length, dy / length
+        px, py = -uy, ux
+        stroke_width = SQUARE_SIZE * 10 / 64
+        line_end_x = xhead - ux * stroke_width
+        line_end_y = yhead - uy * stroke_width
+        points = (
+            (line_end_x - ux * 2.05 * stroke_width - px * 2 * stroke_width,
+             line_end_y - uy * 2.05 * stroke_width - py * 2 * stroke_width),
+            (line_end_x - ux * 2.05 * stroke_width + px * 2 * stroke_width,
+             line_end_y - uy * 2.05 * stroke_width + py * 2 * stroke_width),
+            (line_end_x + ux * 0.95 * stroke_width,
+             line_end_y + uy * 0.95 * stroke_width),
+        )
+    else:
+        head_length = SQUARE_SIZE * 0.36
+        head_half_width = SQUARE_SIZE * 0.26
+        if (
+            abs(chess.square_file(head) - chess.square_file(tail)),
+            abs(chess.square_rank(head) - chess.square_rank(tail)),
+        ) in [(1, 2), (2, 1)]:
+            if abs(dx) > abs(dy):
+                ux, uy = math.copysign(1.0, dx), 0.0
+                vx, vy = 0.0, math.copysign(1.0, dy)
+            else:
+                ux, uy = 0.0, math.copysign(1.0, dy)
+                vx, vy = math.copysign(1.0, dx), 0.0
+            points = (
+                (xhead - vx * head_length + ux * head_half_width,
+                 yhead - vy * head_length + uy * head_half_width),
+                (xhead, yhead),
+                (xhead - vx * head_length - ux * head_half_width,
+                 yhead - vy * head_length - uy * head_half_width),
+            )
+        else:
+            length = math.hypot(dx, dy)
+            ux, uy = dx / length, dy / length
+            px, py = -uy, ux
+            points = (
+                (xhead - ux * head_length + px * head_half_width,
+                 yhead - uy * head_length + py * head_half_width),
+                (xhead, yhead),
+                (xhead - ux * head_length - px * head_half_width,
+                 yhead - uy * head_length - py * head_half_width),
+            )
+
+    return _points_bbox(points)
 
 
 def _coord(text: str, x: int, y: int, width: int, height: int, horizontal: bool, margin: int, *, color: str, opacity: float) -> ET.Element:
@@ -1088,6 +1154,13 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 kind="arrow",
                 color=annotation_color,
                 bbox_xyxy=_points_bbox(arrow_obb),
+                anchor_bbox_xyxy=_arrow_anchor_bbox(
+                    tail,
+                    head,
+                    orientation=orientation,
+                    board_offset=board_offset,
+                    arrow_style=arrow_style,
+                ),
                 tail_xy=(xtail, ytail),
                 head_xy=(xhead, yhead),
                 obb_xyxyxyxy=arrow_obb,
