@@ -51,6 +51,12 @@ class OverlayAnnotation:
     color: CanonicalOverlayColor | None = None
     tail_xy: Tuple[float, float] | None = None
     head_xy: Tuple[float, float] | None = None
+    obb_xyxyxyxy: Tuple[
+        Tuple[float, float],
+        Tuple[float, float],
+        Tuple[float, float],
+        Tuple[float, float],
+    ] | None = None
 
 
 @dataclass(frozen=True)
@@ -309,68 +315,70 @@ def _normalize_legal_moves(
     return tuple(normalized)
 
 
-def _arrow_bbox(
-    tail: Square,
-    head: Square,
-    *,
-    orientation: Color,
-    board_offset: int,
-    arrow_style: ArrowStyle,
-) -> Tuple[float, float, float, float]:
-    """Bounds of the arrowhead, which is the detector's arrow anchor."""
-    xtail, ytail = _square_center(tail, orientation=orientation, board_offset=board_offset)
-    xhead, yhead = _square_center(head, orientation=orientation, board_offset=board_offset)
-    if tail == head:
-        return _box_from_center(xhead, yhead, SQUARE_SIZE / 2)
+def _minimum_area_box(
+    points: Iterable[Tuple[float, float]],
+) -> Tuple[
+    Tuple[float, float],
+    Tuple[float, float],
+    Tuple[float, float],
+    Tuple[float, float],
+]:
+    """Minimum-area rectangle around a rendered primitive."""
+    unique = sorted(set(points))
+    if len(unique) < 3:
+        raise ValueError("oriented bounds require at least three points")
 
-    dx, dy = xhead - xtail, yhead - ytail
-    if arrow_style == "lichess":
+    def cross(
+        origin: Tuple[float, float],
+        first: Tuple[float, float],
+        second: Tuple[float, float],
+    ) -> float:
+        return ((first[0] - origin[0]) * (second[1] - origin[1])
+                - (first[1] - origin[1]) * (second[0] - origin[0]))
+
+    lower: list[Tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper: list[Tuple[float, float]] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+
+    best_area = math.inf
+    best_box: Tuple[
+        Tuple[float, float],
+        Tuple[float, float],
+        Tuple[float, float],
+        Tuple[float, float],
+    ] | None = None
+    for start, end in zip(hull, hull[1:] + hull[:1]):
+        dx, dy = end[0] - start[0], end[1] - start[1]
         length = math.hypot(dx, dy)
         ux, uy = dx / length, dy / length
-        px, py = -uy, ux
-        stroke_width = SQUARE_SIZE * 10 / 64
-        line_end_x = xhead - ux * stroke_width
-        line_end_y = yhead - uy * stroke_width
-        points = (
-            (line_end_x - ux * 2.05 * stroke_width - px * 2 * stroke_width,
-             line_end_y - uy * 2.05 * stroke_width - py * 2 * stroke_width),
-            (line_end_x - ux * 2.05 * stroke_width + px * 2 * stroke_width,
-             line_end_y - uy * 2.05 * stroke_width + py * 2 * stroke_width),
-            (line_end_x + ux * 0.95 * stroke_width,
-             line_end_y + uy * 0.95 * stroke_width),
-        )
-    else:
-        head_length = SQUARE_SIZE * 0.36
-        head_half_width = SQUARE_SIZE * 0.26
-        if (
-            abs(chess.square_file(head) - chess.square_file(tail)),
-            abs(chess.square_rank(head) - chess.square_rank(tail)),
-        ) in [(1, 2), (2, 1)]:
-            if abs(dx) > abs(dy):
-                ux, uy = math.copysign(1.0, dx), 0.0
-                vx, vy = 0.0, math.copysign(1.0, dy)
-            else:
-                ux, uy = 0.0, math.copysign(1.0, dy)
-                vx, vy = math.copysign(1.0, dx), 0.0
-            points = (
-                (xhead - vx * head_length + ux * head_half_width,
-                 yhead - vy * head_length + uy * head_half_width),
-                (xhead, yhead),
-                (xhead - vx * head_length - ux * head_half_width,
-                 yhead - vy * head_length - uy * head_half_width),
+        vx, vy = -uy, ux
+        along = [x * ux + y * uy for x, y in hull]
+        across = [x * vx + y * vy for x, y in hull]
+        lo_u, hi_u = min(along), max(along)
+        lo_v, hi_v = min(across), max(across)
+        area = (hi_u - lo_u) * (hi_v - lo_v)
+        if area < best_area:
+            best_area = area
+            best_box = (
+                (lo_u * ux + lo_v * vx, lo_u * uy + lo_v * vy),
+                (hi_u * ux + lo_v * vx, hi_u * uy + lo_v * vy),
+                (hi_u * ux + hi_v * vx, hi_u * uy + hi_v * vy),
+                (lo_u * ux + hi_v * vx, lo_u * uy + hi_v * vy),
             )
-        else:
-            length = math.hypot(dx, dy)
-            ux, uy = dx / length, dy / length
-            px, py = -uy, ux
-            points = (
-                (xhead - ux * head_length + px * head_half_width,
-                 yhead - uy * head_length + py * head_half_width),
-                (xhead, yhead),
-                (xhead - ux * head_length - px * head_half_width,
-                 yhead - uy * head_length - py * head_half_width),
-            )
+    assert best_box is not None
+    return best_box
 
+
+def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, float, float]:
+    points = tuple(points)
     return (
         min(point[0] for point in points),
         min(point[1] for point in points),
@@ -938,6 +946,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         yhead = board_offset + (7.5 - head_rank if orientation else head_rank + 0.5) * SQUARE_SIZE
 
         if (head_file, head_rank) == (tail_file, tail_rank):
+            radius = SQUARE_SIZE * 0.5
             ET.SubElement(arrow_parent, "circle", _attrs({
                 "cx": xhead,
                 "cy": yhead,
@@ -948,6 +957,12 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 "fill": "none",
                 "class": "circle",
             }))
+            primitive_points = (
+                (xhead - radius, yhead - radius),
+                (xhead + radius, yhead - radius),
+                (xhead + radius, yhead + radius),
+                (xhead - radius, yhead + radius),
+            )
         elif arrow_style == "lichess":
             marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
@@ -968,12 +983,16 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             dx, dy = xhead - xtail, yhead - ytail
             hypot = math.hypot(dx, dy)
             margin = SQUARE_SIZE * 10 / 64
+            ux, uy = dx / hypot, dy / hypot
+            px, py = -uy, ux
+            line_end_x = xhead - ux * margin
+            line_end_y = yhead - uy * margin
 
             ET.SubElement(arrow_parent, "line", _attrs({
                 "x1": xtail,
                 "y1": ytail,
-                "x2": xhead - dx * margin / hypot,
-                "y2": yhead - dy * margin / hypot,
+                "x2": line_end_x,
+                "y2": line_end_y,
                 "stroke": color,
                 "opacity": opacity if opacity < 1.0 else None,
                 "stroke-width": SQUARE_SIZE * 10 / 64,
@@ -981,6 +1000,23 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 "marker-end": f"url(#{marker_id})",
                 "class": "arrow lichess",
             }))
+            half_stroke = margin / 2
+            primitive_points = (
+                (xtail - ux * half_stroke - px * half_stroke,
+                 ytail - uy * half_stroke - py * half_stroke),
+                (xtail - ux * half_stroke + px * half_stroke,
+                 ytail - uy * half_stroke + py * half_stroke),
+                (line_end_x + ux * half_stroke - px * half_stroke,
+                 line_end_y + uy * half_stroke - py * half_stroke),
+                (line_end_x + ux * half_stroke + px * half_stroke,
+                 line_end_y + uy * half_stroke + py * half_stroke),
+                (line_end_x - ux * 2.05 * margin - px * 2 * margin,
+                 line_end_y - uy * 2.05 * margin - py * 2 * margin),
+                (line_end_x - ux * 2.05 * margin + px * 2 * margin,
+                 line_end_y - uy * 2.05 * margin + py * 2 * margin),
+                (line_end_x + ux * 0.95 * margin,
+                 line_end_y + uy * 0.95 * margin),
+            )
         else:
             tail_gap = SQUARE_SIZE * 0.36
             shaft_half_width = SQUARE_SIZE * 0.11
@@ -1041,23 +1077,20 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 "opacity": opacity if opacity < 1.0 else None,
                 "class": "arrow chess-com",
             }))
+            primitive_points = tuple(points)
 
         annotation_color: CanonicalOverlayColor | None = (
             arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
         )
+        arrow_obb = _minimum_area_box(primitive_points)
         annotations.append(
             OverlayAnnotation(
                 kind="arrow",
                 color=annotation_color,
-                bbox_xyxy=_arrow_bbox(
-                    tail,
-                    head,
-                    orientation=orientation,
-                    board_offset=board_offset,
-                    arrow_style=arrow_style,
-                ),
+                bbox_xyxy=_points_bbox(arrow_obb),
                 tail_xy=(xtail, ytail),
                 head_xy=(xhead, yhead),
+                obb_xyxyxyxy=arrow_obb,
             )
         )
 

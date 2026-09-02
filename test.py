@@ -4462,6 +4462,21 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(arrow.tail_xy, (4.5 * chess.svg.SQUARE_SIZE, 6.5 * chess.svg.SQUARE_SIZE))
         self.assertEqual(arrow.head_xy, (4.5 * chess.svg.SQUARE_SIZE, 4.5 * chess.svg.SQUARE_SIZE))
         self.assertLess(arrow.bbox_xyxy[2] - arrow.bbox_xyxy[0], chess.svg.SQUARE_SIZE)
+        self.assertGreater(arrow.bbox_xyxy[3] - arrow.bbox_xyxy[1], chess.svg.SQUARE_SIZE)
+        self.assertIsNotNone(arrow.obb_xyxyxyxy)
+        self.assertEqual(len(arrow.obb_xyxyxyxy), 4)
+
+    def test_svg_crossing_arrows_have_distinct_oriented_bounds(self):
+        rendered = chess.svg.board_with_annotations(
+            arrows=[
+                chess.svg.Arrow(chess.E4, chess.D5),
+                chess.svg.Arrow(chess.D4, chess.E5),
+            ],
+            coordinates=False,
+        )
+
+        first, second = rendered.annotations
+        self.assertNotEqual(first.obb_xyxyxyxy, second.obb_xyxyxyxy)
 
     def test_svg_chess_com_arrow_style(self):
         svg = chess.svg.board(
