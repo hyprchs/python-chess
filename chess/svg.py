@@ -646,7 +646,16 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         or ``#15781B80`` (transparent).
     :param borders: Pass ``True`` to enable a border around the board and,
        (if *coordinates* is enabled) the coordinate margin.
-    :param style: A CSS stylesheet to include in the SVG image.
+    :param style: A CSS stylesheet to include in the SVG image. Annotation
+        bounds describe the renderer's built-in geometry; custom CSS that
+        changes overlay geometry is not reflected in those bounds.
+    :param legal_moves: Legal moves from one source square whose destinations
+        should be marked. Promotion variants sharing a destination are
+        deduplicated.
+    :param legal_move_style: The legal-destination geometry, either
+        ``"lichess"`` (the default) or ``"chess.com"``.
+    :param user_highlights: Foreground square-circle annotations with canonical
+        colors and a Lichess or Chess.com palette.
 
     >>> import chess
     >>> import chess.svg
@@ -1153,7 +1162,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             OverlayAnnotation(
                 kind="arrow",
                 color=annotation_color,
-                bbox_xyxy=_points_bbox(arrow_obb),
+                bbox_xyxy=_points_bbox(primitive_points),
                 anchor_bbox_xyxy=_arrow_anchor_bbox(
                     tail,
                     head,

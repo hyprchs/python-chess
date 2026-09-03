@@ -4481,7 +4481,40 @@ class SvgTestCase(unittest.TestCase):
         )
 
         first, second = rendered.annotations
-        self.assertNotEqual(first.obb_xyxyxyxy, second.obb_xyxyxyxy)
+        self.assertEqual(
+            (first.tail_xy, first.head_xy),
+            ((202.5, 202.5), (157.5, 157.5)),
+        )
+        self.assertEqual(
+            (second.tail_xy, second.head_xy),
+            ((157.5, 202.5), (202.5, 157.5)),
+        )
+        self.assertEqual(
+            tuple(round(value, 6) for value in first.bbox_xyxy),
+            (157.5, 157.5, 207.471845, 207.471845),
+        )
+        self.assertEqual(
+            tuple(round(value, 6) for value in second.bbox_xyxy),
+            (152.528155, 157.5, 202.5, 207.471845),
+        )
+        self.assertEqual(
+            tuple(tuple(round(value, 6) for value in point) for point in first.obb_xyxyxyxy),
+            (
+                (173.389551, 147.972284),
+                (208.309721, 203.840506),
+                (185.070836, 218.365862),
+                (150.150666, 162.497640),
+            ),
+        )
+        self.assertEqual(
+            tuple(tuple(round(value, 6) for value in point) for point in second.obb_xyxyxyxy),
+            (
+                (151.690279, 203.840506),
+                (186.610449, 147.972284),
+                (209.849334, 162.497640),
+                (174.929164, 218.365862),
+            ),
+        )
 
     def test_arrow_anchor_collisions_only_share_a_head_and_incoming_ray(self):
         for style in ("lichess", "chess.com"):
@@ -4588,6 +4621,12 @@ class SvgTestCase(unittest.TestCase):
 
         root = chess.svg.ET.fromstring(rendered.svg)
         namespace = "{http://www.w3.org/2000/svg}"
+        dot = root.find(
+            f".//{namespace}circle[@class='legal-destination lichess dot']"
+        )
+        self.assertIsNotNone(dot)
+        self.assertEqual(float(dot.get("cx")), 3.5 * chess.svg.SQUARE_SIZE)
+        self.assertEqual(float(dot.get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
         capture = root.find(
             f".//{namespace}rect[@class='legal-destination lichess capture']"
         )
@@ -4623,6 +4662,10 @@ class SvgTestCase(unittest.TestCase):
         )
         self.assertEqual(len(dots), 1)
         self.assertEqual(len(captures), 1)
+        self.assertEqual(float(dots[0].get("cx")), 3.5 * chess.svg.SQUARE_SIZE)
+        self.assertEqual(float(dots[0].get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
+        self.assertEqual(float(captures[0].get("cx")), 5.5 * chess.svg.SQUARE_SIZE)
+        self.assertEqual(float(captures[0].get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(dots[0].get("r")), chess.svg.SQUARE_SIZE * 0.164)
         self.assertEqual(float(captures[0].get("stroke-width")), chess.svg.SQUARE_SIZE * 0.088)
         self.assertEqual(captures[0].get("opacity"), "0.14")
