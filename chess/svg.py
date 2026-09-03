@@ -965,7 +965,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             "stroke": color,
             "stroke-width": stroke_width,
             "opacity": opacity if opacity < 1.0 else None,
-            "class": f"user-highlight {highlight.palette}",
+            "class": f"user-highlight {highlight.palette.replace('.', '-')}",
         }))
         annotations.append(
             OverlayAnnotation(

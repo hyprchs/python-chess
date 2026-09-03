@@ -4573,7 +4573,7 @@ class SvgTestCase(unittest.TestCase):
 
         self.assertIn('class="legal-destination lichess dot"', rendered.svg)
         self.assertIn('class="legal-destination lichess capture"', rendered.svg)
-        self.assertIn('class="user-highlight chess.com"', rendered.svg)
+        self.assertIn('class="user-highlight chess-com"', rendered.svg)
         self.assertEqual(
             [annotation.kind for annotation in rendered.annotations],
             ["legal_destination_dot", "legal_destination_capture", "user_highlight"],
