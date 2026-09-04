@@ -4472,11 +4472,14 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(len(arrow.obb_xyxyxyxy), 4)
 
     def test_svg_lichess_rejects_per_arrow_alpha(self):
-        with self.assertRaisesRegex(ValueError, "must not specify per-arrow alpha"):
-            chess.svg.board(
-                arrows=[chess.svg.Arrow(chess.E2, chess.E4, color="#12345680")],
-                arrow_style="lichess",
-            )
+        for color in ("#12345680", "rgba(18, 52, 86, 0.5)", "transparent"):
+            with self.subTest(color=color), self.assertRaisesRegex(
+                ValueError, "must be opaque hex or named colors"
+            ):
+                chess.svg.board(
+                    arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)],
+                    arrow_style="lichess",
+                )
 
     def test_svg_crossing_arrows_have_distinct_oriented_bounds(self):
         rendered = chess.svg.board_with_annotations(

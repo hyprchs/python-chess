@@ -1027,8 +1027,13 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         else:
             color, opacity = _color(arrow_color)
         if arrow_style == "lichess":
-            if opacity < 1.0:
-                raise ValueError("lichess arrow colors must not specify per-arrow alpha")
+            normalized_color = color.strip().lower()
+            if (
+                opacity < 1.0
+                or normalized_color == "transparent"
+                or "(" in normalized_color
+            ):
+                raise ValueError("lichess arrow colors must be opaque hex or named colors")
             assert lichess_shapes is not None
             arrow_parent = lichess_shapes
 
