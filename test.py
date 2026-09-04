@@ -11,6 +11,7 @@ import platform
 import sys
 import tempfile
 import textwrap
+import typing
 import unittest
 import io
 
@@ -4393,6 +4394,9 @@ class GaviotaTestCase(unittest.TestCase):
 
 
 class SvgTestCase(unittest.TestCase):
+
+    def test_svg_overlay_annotation_type_hints_are_resolvable(self):
+        self.assertIn("arrowhead_bbox_xyxy", typing.get_type_hints(chess.svg.OverlayAnnotation))
 
     def test_svg_board(self):
         svg = chess.BaseBoard("4k3/8/8/8/8/8/8/4KB2")._repr_svg_()

@@ -52,16 +52,16 @@ class OverlayAnnotation:
         "legal_destination_capture",
     ]
     bbox_xyxy: Tuple[float, float, float, float]
-    arrowhead_bbox_xyxy: Tuple[float, float, float, float] | None = None
-    color: CanonicalOverlayColor | None = None
-    tail_xy: Tuple[float, float] | None = None
-    head_xy: Tuple[float, float] | None = None
-    obb_xyxyxyxy: Tuple[
+    arrowhead_bbox_xyxy: Optional[Tuple[float, float, float, float]] = None
+    color: Optional[CanonicalOverlayColor] = None
+    tail_xy: Optional[Tuple[float, float]] = None
+    head_xy: Optional[Tuple[float, float]] = None
+    obb_xyxyxyxy: Optional[Tuple[
         Tuple[float, float],
         Tuple[float, float],
         Tuple[float, float],
         Tuple[float, float],
-    ] | None = None
+    ]] = None
 
 
 @dataclass(frozen=True)
@@ -1160,7 +1160,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             primitive_bbox = _points_bbox(primitive_points)
             arrowhead_bbox = _points_bbox(points[3:6] if is_knight_move else points[2:5])
 
-        annotation_color: CanonicalOverlayColor | None = (
+        annotation_color: Optional[CanonicalOverlayColor] = (
             arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
         )
         arrow_obb = _oriented_box(primitive_points, arrow_direction)
