@@ -4404,9 +4404,10 @@ class SvgTestCase(unittest.TestCase):
         self.assertNotIn("black queen", svg)
 
     def test_svg_arrows(self):
-        svg = chess.svg.board(arrows=[(chess.A1, chess.A1)])
-        self.assertIn("<circle", svg)
-        self.assertNotIn("<line", svg)
+        rendered = chess.svg.board_with_annotations(arrows=[(chess.A1, chess.A1)])
+        self.assertIn("<circle", rendered.svg)
+        self.assertNotIn("<line", rendered.svg)
+        self.assertIsNone(rendered.annotations[0].arrowhead_bbox_xyxy)
 
         svg = chess.svg.board(arrows=[chess.svg.Arrow(chess.A1, chess.H8)])
         self.assertNotIn("<circle", svg)
@@ -4479,7 +4480,7 @@ class SvgTestCase(unittest.TestCase):
         self.assertIsNotNone(arrow.obb_xyxyxyxy)
         self.assertEqual(len(arrow.obb_xyxyxyxy), 4)
 
-    def test_svg_lichess_rejects_per_arrow_alpha(self):
+    def test_svg_lichess_requires_an_opaque_color(self):
         for color in (
             "#12345680",
             "rgba(18, 52, 86, 0.5)",
@@ -4490,10 +4491,20 @@ class SvgTestCase(unittest.TestCase):
             "revert",
             "revert-layer",
             "unset",
+            "",
+            "bogus",
+            "#xyz",
         ):
             with self.subTest(color=color), self.assertRaisesRegex(
                 ValueError, "must be opaque hex or named colors"
             ):
+                chess.svg.board(
+                    arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)],
+                    arrow_style="lichess",
+                )
+
+        for color in ("#abc", "#123456", "rebeccapurple"):
+            with self.subTest(color=color):
                 chess.svg.board(
                     arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)],
                     arrow_style="lichess",
@@ -4507,6 +4518,27 @@ class SvgTestCase(unittest.TestCase):
                     chess.svg.UserHighlight(chess.E4, "blue", "lichess"),
                 ]
             )
+
+    def test_svg_arrows_render_above_cross_palette_highlights(self):
+        svg = chess.svg.board(
+            arrows=[chess.svg.Arrow(chess.E4, chess.E5)],
+            arrow_style="lichess",
+            user_highlights=[chess.svg.UserHighlight(chess.E4, "blue", "chess.com")],
+        )
+        self.assertLess(
+            svg.index('class="user-highlight chess-com"'),
+            svg.index('class="shapes lichess"'),
+        )
+
+        svg = chess.svg.board(
+            arrows=[chess.svg.Arrow(chess.E4, chess.E5)],
+            arrow_style="chess.com",
+            user_highlights=[chess.svg.UserHighlight(chess.E4, "blue", "lichess")],
+        )
+        self.assertLess(
+            svg.index('class="shapes lichess"'),
+            svg.index('class="arrow chess-com"'),
+        )
 
     def test_svg_crossing_arrows_have_arrow_aligned_bounds(self):
         rendered = chess.svg.board_with_annotations(

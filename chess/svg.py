@@ -155,6 +155,22 @@ LICHESS_ARROW_COLORS = {
     "arrow blue": "#003088",
 }
 
+_CSS_NAMED_COLORS = frozenset("""
+    aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+    burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod
+    darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue
+    darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen
+    fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred
+    indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray
+    lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen
+    linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred
+    midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid
+    palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple
+    red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue
+    slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat
+    white whitesmoke yellow yellowgreen
+""".split())
+
 
 class Arrow:
     """Details of an arrow to be drawn."""
@@ -270,6 +286,18 @@ def _color(color: str) -> Tuple[str, float]:
         except ValueError:
             pass  # Ignore invalid hex value
     return color, 1.0
+
+
+def _is_opaque_color(color: str, opacity: float) -> bool:
+    normalized = color.strip().lower()
+    return opacity == 1.0 and (
+        normalized in _CSS_NAMED_COLORS
+        or (
+            len(normalized) in (4, 7)
+            and normalized.startswith("#")
+            and all(character in "0123456789abcdef" for character in normalized[1:])
+        )
+    )
 
 
 def _square_origin(square: Square, *, orientation: Color, board_offset: int) -> Tuple[float, float]:
@@ -917,7 +945,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             }))
 
     lichess_shapes = (
-        ET.SubElement(svg, "g", {"class": "shapes lichess", "opacity": "0.6"})
+        ET.Element("g", {"class": "shapes lichess", "opacity": "0.6"})
         if any(highlight.palette == "lichess" for highlight in highlights)
         or (arrow_style == "lichess" and bool(arrows))
         else None
@@ -955,6 +983,9 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             )
         )
 
+    if lichess_shapes is not None:
+        svg.append(lichess_shapes)
+
     # Namespace marker IDs so multiple inline boards do not share definitions.
     marker_namespace = uuid.uuid4().hex
 
@@ -979,21 +1010,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         else:
             color, opacity = _color(arrow_color)
         if arrow_style == "lichess":
-            normalized_color = color.strip().lower()
-            if (
-                opacity < 1.0
-                or normalized_color
-                in {
-                    "inherit",
-                    "initial",
-                    "none",
-                    "revert",
-                    "revert-layer",
-                    "transparent",
-                    "unset",
-                }
-                or "(" in normalized_color
-            ):
+            if not _is_opaque_color(color, opacity):
                 raise ValueError("lichess arrow colors must be opaque hex or named colors")
             assert lichess_shapes is not None
             arrow_parent = lichess_shapes
@@ -1028,7 +1045,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 (xhead - radius, yhead + radius),
             )
             primitive_bbox = _points_bbox(primitive_points)
-            arrowhead_bbox = primitive_bbox
+            arrowhead_bbox = None
         elif arrow_style == "lichess":
             marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
