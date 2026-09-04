@@ -4501,11 +4501,11 @@ class SvgTestCase(unittest.TestCase):
         )
         self.assertEqual(
             tuple(round(value, 6) for value in first.bbox_xyxy),
-            (157.5, 157.5, 207.471845, 207.471845),
+            (157.748592, 157.748592, 206.015625, 206.015625),
         )
         self.assertEqual(
             tuple(round(value, 6) for value in second.bbox_xyxy),
-            (152.528155, 157.5, 202.5, 207.471845),
+            (153.984375, 157.748592, 202.251408, 206.015625),
         )
         self.assertEqual(
             tuple(tuple(round(value, 6) for value in point) for point in first.obb_xyxyxyxy),

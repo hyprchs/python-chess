@@ -1104,6 +1104,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 (xhead + radius, yhead + radius),
                 (xhead - radius, yhead + radius),
             )
+            primitive_bbox = _points_bbox(primitive_points)
         elif arrow_style == "lichess":
             marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
@@ -1142,6 +1143,14 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 "class": "arrow lichess",
             }))
             half_stroke = margin / 2
+            marker_points = (
+                (line_end_x - ux * 2.05 * margin - px * 2 * margin,
+                 line_end_y - uy * 2.05 * margin - py * 2 * margin),
+                (line_end_x - ux * 2.05 * margin + px * 2 * margin,
+                 line_end_y - uy * 2.05 * margin + py * 2 * margin),
+                (line_end_x + ux * 0.95 * margin,
+                 line_end_y + uy * 0.95 * margin),
+            )
             primitive_points = (
                 (xtail - ux * half_stroke - px * half_stroke,
                  ytail - uy * half_stroke - py * half_stroke),
@@ -1151,12 +1160,13 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                  line_end_y + uy * half_stroke - py * half_stroke),
                 (line_end_x + ux * half_stroke + px * half_stroke,
                  line_end_y + uy * half_stroke + py * half_stroke),
-                (line_end_x - ux * 2.05 * margin - px * 2 * margin,
-                 line_end_y - uy * 2.05 * margin - py * 2 * margin),
-                (line_end_x - ux * 2.05 * margin + px * 2 * margin,
-                 line_end_y - uy * 2.05 * margin + py * 2 * margin),
-                (line_end_x + ux * 0.95 * margin,
-                 line_end_y + uy * 0.95 * margin),
+            ) + marker_points
+            marker_bbox = _points_bbox(marker_points)
+            primitive_bbox = (
+                min(min(xtail, line_end_x) - half_stroke, marker_bbox[0]),
+                min(min(ytail, line_end_y) - half_stroke, marker_bbox[1]),
+                max(max(xtail, line_end_x) + half_stroke, marker_bbox[2]),
+                max(max(ytail, line_end_y) + half_stroke, marker_bbox[3]),
             )
         else:
             tail_gap = SQUARE_SIZE * 0.36
@@ -1219,6 +1229,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 "class": "arrow chess-com",
             }))
             primitive_points = tuple(points)
+            primitive_bbox = _points_bbox(primitive_points)
 
         annotation_color: CanonicalOverlayColor | None = (
             arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
@@ -1228,7 +1239,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             OverlayAnnotation(
                 kind="arrow",
                 color=annotation_color,
-                bbox_xyxy=_points_bbox(primitive_points),
+                bbox_xyxy=primitive_bbox,
                 arrowhead_bbox_xyxy=_arrowhead_bbox(
                     tail,
                     head,
