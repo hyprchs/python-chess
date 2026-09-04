@@ -287,7 +287,10 @@ def _box_from_center(cx: float, cy: float, radius: float) -> Tuple[float, float,
 
 
 def _normalize_legal_moves(
-    board: Optional[chess.BaseBoard], legal_moves: Iterable[chess.Move]
+    board: Optional[chess.BaseBoard],
+    legal_moves: Iterable[chess.Move],
+    *,
+    legal_move_style: LegalMoveStyle,
 ) -> Tuple[Tuple[chess.Move, Literal["legal_destination_dot", "legal_destination_capture"]], ...]:
     requested = tuple(legal_moves)
     if not requested:
@@ -302,17 +305,29 @@ def _normalize_legal_moves(
     for move in requested:
         if move not in board.legal_moves:
             raise ValueError(f"legal_moves contains an illegal move: {move.uci()}")
-        if move.to_square in seen_destinations:
-            continue
-        seen_destinations.add(move.to_square)
-        normalized.append(
-            (
-                move,
-                "legal_destination_dot"
-                if board.piece_at(move.to_square) is None
-                else "legal_destination_capture",
+        destinations = (move,)
+        if legal_move_style == "lichess" and board.is_castling(move):
+            # Chessground exposes both accepted castling gestures.
+            king_file = 6 if board.is_kingside_castling(move) else 2
+            destinations = (
+                chess.Move(
+                    move.from_square,
+                    chess.square(king_file, chess.square_rank(move.from_square)),
+                ),
+                board._to_chess960(move),
             )
-        )
+        for destination in destinations:
+            if destination.to_square in seen_destinations:
+                continue
+            seen_destinations.add(destination.to_square)
+            normalized.append(
+                (
+                    destination,
+                    "legal_destination_dot"
+                    if board.piece_at(destination.to_square) is None
+                    else "legal_destination_capture",
+                )
+            )
     return tuple(normalized)
 
 
@@ -652,7 +667,8 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         changes overlay geometry is not reflected in those bounds.
     :param legal_moves: Legal moves from one source square whose destinations
         should be marked. Promotion variants sharing a destination are
-        deduplicated.
+        deduplicated. Lichess-style castling shows both the king destination
+        and the rook square.
     :param legal_move_style: The legal-destination geometry, either
         ``"lichess"`` (the default) or ``"chess.com"``.
     :param user_highlights: Foreground square-circle annotations with canonical
@@ -678,7 +694,9 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         raise ValueError(f"unsupported arrow style: {arrow_style!r}")
     if legal_move_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported legal move style: {legal_move_style!r}")
-    legal_destinations = _normalize_legal_moves(board, legal_moves)
+    legal_destinations = _normalize_legal_moves(
+        board, legal_moves, legal_move_style=legal_move_style
+    )
     arrows = tuple(arrows)
     highlights = tuple(user_highlights)
     if any(not isinstance(highlight, UserHighlight) for highlight in highlights):

@@ -4652,6 +4652,47 @@ class SvgTestCase(unittest.TestCase):
             [("0%", "0"), ("80%", "0"), ("80%", "0.3"), ("100%", "0.3")],
         )
 
+    def test_svg_lichess_castling_shows_king_and_rook_destinations(self):
+        for chess960, move_names in (
+            (False, ("e1c1", "e1g1")),
+            (True, ("e1a1", "e1h1")),
+        ):
+            with self.subTest(chess960=chess960):
+                board = chess.Board(
+                    "4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1", chess960=chess960
+                )
+                rendered = chess.svg.board_with_annotations(
+                    board,
+                    coordinates=False,
+                    legal_moves=[chess.Move.from_uci(name) for name in move_names],
+                    legal_move_style="lichess",
+                )
+
+                self.assertEqual(
+                    [annotation.kind for annotation in rendered.annotations],
+                    [
+                        "legal_destination_dot",
+                        "legal_destination_capture",
+                        "legal_destination_dot",
+                        "legal_destination_capture",
+                    ],
+                )
+                self.assertEqual(
+                    [
+                        tuple(
+                            round(value / chess.svg.SQUARE_SIZE, 1)
+                            for value in annotation.bbox_xyxy
+                        )
+                        for annotation in rendered.annotations
+                    ],
+                    [
+                        (2.3, 7.3, 2.7, 7.7),
+                        (0.0, 7.0, 1.0, 8.0),
+                        (6.3, 7.3, 6.7, 7.7),
+                        (7.0, 7.0, 8.0, 8.0),
+                    ],
+                )
+
     def test_svg_chess_com_legal_destinations_match_live_geometry(self):
         board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
         rendered = chess.svg.board_with_annotations(
