@@ -588,11 +588,64 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           legal_moves: Iterable[chess.Move] = (),
           legal_move_style: LegalMoveStyle = "lichess",
           user_highlights: Iterable[UserHighlight] = ()) -> "SvgWrapper":
-    """Renders a board SVG, including optional overlays.
+    """
+    Renders a board with pieces and/or selected squares as an SVG image.
+    Use :func:`board_with_annotations` when semantic overlay bounds are needed.
 
-    This compatibility entry point deliberately returns only the SVG. Call
-    :func:`board_with_annotations` when the corresponding semantic primitive
-    bounds are required.
+    :param board: A :class:`chess.BaseBoard` for a chessboard with pieces, or
+        ``None`` (the default) for a chessboard without pieces.
+    :param orientation: The point of view, defaulting to ``chess.WHITE``.
+    :param lastmove: A :class:`chess.Move` to be highlighted.
+    :param check: A square to be marked indicating a check.
+    :param arrows: A list of :class:`~chess.svg.Arrow` objects, like
+        ``[chess.svg.Arrow(chess.E2, chess.E4)]``, or a list of tuples, like
+        ``[(chess.E2, chess.E4)]``. An arrow from a square pointing to the same
+        square is drawn as a circle, like ``[(chess.E2, chess.E2)]``.
+    :param arrow_style: The arrow geometry and default palette. ``"lichess"``
+        (the default) uses rounded shafts with triangular markers, matching
+        Chessground. All Lichess arrows share the site's opacity layer, so
+        custom arrow colors must be opaque. ``"chess.com"`` uses filled
+        polygons and renders knight moves as L-shaped arrows.
+    :param fill: A dictionary mapping squares to a colors that they should be
+        filled with.
+    :param squares: A :class:`chess.SquareSet` with selected squares to mark
+        with an X.
+    :param size: The size of the image in pixels (e.g., ``400`` for a 400 by
+        400 board), or ``None`` (the default) for no size limit.
+    :param coordinates: Pass ``False`` to disable the coordinate margin.
+    :param colors: A dictionary to override default colors. Possible keys are
+        ``square light``, ``square dark``, ``square light lastmove``,
+        ``square dark lastmove``, ``margin``, ``coord``, ``inner border``,
+        ``outer border``, ``arrow green``, ``arrow blue``, ``arrow red``,
+        and ``arrow yellow``. Values should look like ``#ffce9e`` (opaque),
+        or ``#15781B80`` (transparent).
+    :param borders: Pass ``True`` to enable a border around the board and,
+       (if *coordinates* is enabled) the coordinate margin.
+    :param style: A CSS stylesheet to include in the SVG image.
+    :param legal_moves: Legal moves from one source square whose destinations
+        should be marked. Promotion variants sharing a destination are
+        deduplicated. Lichess-style castling shows both the king destination
+        and the rook square.
+    :param legal_move_style: The legal-destination geometry, either
+        ``"lichess"`` (the default) or ``"chess.com"``.
+    :param user_highlights: Foreground square-circle annotations with canonical
+        colors and a Lichess or Chess.com palette.
+
+    >>> import chess
+    >>> import chess.svg
+    >>>
+    >>> board = chess.Board("8/8/8/8/4N3/8/8/8 w - - 0 1")
+    >>>
+    >>> chess.svg.board(
+    ...     board,
+    ...     fill=dict.fromkeys(board.attacks(chess.E4), "#cc0000cc"),
+    ...     arrows=[chess.svg.Arrow(chess.E4, chess.F6, color="#0000cc")],
+    ...     squares=chess.SquareSet(chess.BB_DARK_SQUARES & chess.BB_FILE_B),
+    ...     size=350,
+    ... )  # doctest: +SKIP
+
+    .. image:: ../docs/Ne4.svg
+        :alt: 8/8/8/8/4N3/8/8/8
     """
     return _render_board(
         board,
@@ -673,64 +726,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   legal_moves: Iterable[chess.Move] = (),
                   legal_move_style: LegalMoveStyle = "lichess",
                   user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
-    """
-    Renders a board with pieces and/or selected squares as an SVG image.
-
-    :param board: A :class:`chess.BaseBoard` for a chessboard with pieces, or
-        ``None`` (the default) for a chessboard without pieces.
-    :param orientation: The point of view, defaulting to ``chess.WHITE``.
-    :param lastmove: A :class:`chess.Move` to be highlighted.
-    :param check: A square to be marked indicating a check.
-    :param arrows: A list of :class:`~chess.svg.Arrow` objects, like
-        ``[chess.svg.Arrow(chess.E2, chess.E4)]``, or a list of tuples, like
-        ``[(chess.E2, chess.E4)]``. An arrow from a square pointing to the same
-        square is drawn as a circle, like ``[(chess.E2, chess.E2)]``.
-    :param arrow_style: The arrow geometry and default palette. ``"lichess"``
-        (the default) uses rounded shafts with triangular markers, matching
-        Chessground. All Lichess arrows share the site's opacity layer, so
-        custom arrow colors must be opaque. ``"chess.com"`` uses filled
-        polygons and renders knight moves as L-shaped arrows.
-    :param fill: A dictionary mapping squares to a colors that they should be
-        filled with.
-    :param squares: A :class:`chess.SquareSet` with selected squares to mark
-        with an X.
-    :param size: The size of the image in pixels (e.g., ``400`` for a 400 by
-        400 board), or ``None`` (the default) for no size limit.
-    :param coordinates: Pass ``False`` to disable the coordinate margin.
-    :param colors: A dictionary to override default colors. Possible keys are
-        ``square light``, ``square dark``, ``square light lastmove``,
-        ``square dark lastmove``, ``margin``, ``coord``, ``inner border``,
-        ``outer border``, ``arrow green``, ``arrow blue``, ``arrow red``,
-        and ``arrow yellow``. Values should look like ``#ffce9e`` (opaque),
-        or ``#15781B80`` (transparent).
-    :param borders: Pass ``True`` to enable a border around the board and,
-       (if *coordinates* is enabled) the coordinate margin.
-    :param style: A CSS stylesheet to include in the SVG image.
-    :param legal_moves: Legal moves from one source square whose destinations
-        should be marked. Promotion variants sharing a destination are
-        deduplicated. Lichess-style castling shows both the king destination
-        and the rook square.
-    :param legal_move_style: The legal-destination geometry, either
-        ``"lichess"`` (the default) or ``"chess.com"``.
-    :param user_highlights: Foreground square-circle annotations with canonical
-        colors and a Lichess or Chess.com palette.
-
-    >>> import chess
-    >>> import chess.svg
-    >>>
-    >>> board = chess.Board("8/8/8/8/4N3/8/8/8 w - - 0 1")
-    >>>
-    >>> chess.svg.board(
-    ...     board,
-    ...     fill=dict.fromkeys(board.attacks(chess.E4), "#cc0000cc"),
-    ...     arrows=[chess.svg.Arrow(chess.E4, chess.F6, color="#0000cc")],
-    ...     squares=chess.SquareSet(chess.BB_DARK_SQUARES & chess.BB_FILE_B),
-    ...     size=350,
-    ... )  # doctest: +SKIP
-
-    .. image:: ../docs/Ne4.svg
-        :alt: 8/8/8/8/4N3/8/8/8
-    """
+    """Builds the shared SVG and annotation result for the public renderers."""
     if arrow_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported arrow style: {arrow_style!r}")
     if legal_move_style not in ["lichess", "chess.com"]:
@@ -742,6 +738,14 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
     highlights = tuple(user_highlights)
     if any(not isinstance(highlight, UserHighlight) for highlight in highlights):
         raise TypeError("user_highlights must contain UserHighlight values")
+    highlight_palettes: Dict[Square, LegalMoveStyle] = {}
+    for highlight in highlights:
+        if (
+            highlight.square in highlight_palettes
+            and highlight_palettes[highlight.square] != highlight.palette
+        ):
+            raise ValueError("user highlights on one square must use one palette")
+        highlight_palettes[highlight.square] = highlight.palette
     annotations: list[OverlayAnnotation] = []
 
     inner_border = 1 if borders and coordinates else 0
@@ -1071,7 +1075,16 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             normalized_color = color.strip().lower()
             if (
                 opacity < 1.0
-                or normalized_color == "transparent"
+                or normalized_color
+                in {
+                    "inherit",
+                    "initial",
+                    "none",
+                    "revert",
+                    "revert-layer",
+                    "transparent",
+                    "unset",
+                }
                 or "(" in normalized_color
             ):
                 raise ValueError("lichess arrow colors must be opaque hex or named colors")

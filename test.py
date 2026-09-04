@@ -4472,7 +4472,17 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(len(arrow.obb_xyxyxyxy), 4)
 
     def test_svg_lichess_rejects_per_arrow_alpha(self):
-        for color in ("#12345680", "rgba(18, 52, 86, 0.5)", "transparent"):
+        for color in (
+            "#12345680",
+            "rgba(18, 52, 86, 0.5)",
+            "transparent",
+            "none",
+            "inherit",
+            "initial",
+            "revert",
+            "revert-layer",
+            "unset",
+        ):
             with self.subTest(color=color), self.assertRaisesRegex(
                 ValueError, "must be opaque hex or named colors"
             ):
@@ -4480,6 +4490,15 @@ class SvgTestCase(unittest.TestCase):
                     arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)],
                     arrow_style="lichess",
                 )
+
+    def test_svg_rejects_mixed_highlight_palettes_on_one_square(self):
+        with self.assertRaisesRegex(ValueError, "one square must use one palette"):
+            chess.svg.board(
+                user_highlights=[
+                    chess.svg.UserHighlight(chess.E4, "green", "chess.com"),
+                    chess.svg.UserHighlight(chess.E4, "blue", "lichess"),
+                ]
+            )
 
     def test_svg_crossing_arrows_have_distinct_oriented_bounds(self):
         rendered = chess.svg.board_with_annotations(
