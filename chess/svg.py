@@ -48,7 +48,7 @@ class OverlayAnnotation:
         "legal_destination_capture",
     ]
     bbox_xyxy: Tuple[float, float, float, float]
-    anchor_bbox_xyxy: Tuple[float, float, float, float] | None = None
+    arrowhead_bbox_xyxy: Tuple[float, float, float, float] | None = None
     color: CanonicalOverlayColor | None = None
     tail_xy: Tuple[float, float] | None = None
     head_xy: Tuple[float, float] | None = None
@@ -403,7 +403,7 @@ def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, f
     )
 
 
-def _arrow_anchor_bbox(
+def _arrowhead_bbox(
     tail: Square,
     head: Square,
     *,
@@ -411,7 +411,7 @@ def _arrow_anchor_bbox(
     board_offset: int,
     arrow_style: ArrowStyle,
 ) -> Tuple[float, float, float, float]:
-    """Bounds of the rendered arrowhead used as the pose detector anchor."""
+    """Bounds of the rendered arrowhead."""
     xtail, ytail = _square_center(tail, orientation=orientation, board_offset=board_offset)
     xhead, yhead = _square_center(head, orientation=orientation, board_offset=board_offset)
     if tail == head:
@@ -586,13 +586,13 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           legal_moves: Iterable[chess.Move] = (),
           legal_move_style: LegalMoveStyle = "lichess",
           user_highlights: Iterable[UserHighlight] = ()) -> "SvgWrapper":
-    """Renders a board SVG, including optional overlay annotations.
+    """Renders a board SVG, including optional overlays.
 
     This compatibility entry point deliberately returns only the SVG. Call
     :func:`board_with_annotations` when the corresponding semantic primitive
     bounds are required.
     """
-    return board_with_annotations(
+    return _render_board(
         board,
         orientation=orientation,
         lastmove=lastmove,
@@ -625,11 +625,52 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            coordinates: bool = True,
                            colors: Dict[str, str] = {},
                            borders: bool = False,
-                           style: Optional[str] = None,
                            piece_set: Optional[str] = None,
                            legal_moves: Iterable[chess.Move] = (),
                            legal_move_style: LegalMoveStyle = "lichess",
                            user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
+    """Renders a board SVG with renderer-owned semantic overlay geometry.
+
+    Parameters match :func:`board`, except arbitrary CSS ``style`` is
+    deliberately unavailable because it could invalidate the returned bounds.
+    """
+    return _render_board(
+        board,
+        orientation=orientation,
+        lastmove=lastmove,
+        check=check,
+        arrows=arrows,
+        arrow_style=arrow_style,
+        fill=fill,
+        squares=squares,
+        size=size,
+        coordinates=coordinates,
+        colors=colors,
+        borders=borders,
+        piece_set=piece_set,
+        legal_moves=legal_moves,
+        legal_move_style=legal_move_style,
+        user_highlights=user_highlights,
+    )
+
+
+def _render_board(board: Optional[chess.BaseBoard] = None, *,
+                  orientation: Color = chess.WHITE,
+                  lastmove: Optional[chess.Move] = None,
+                  check: Optional[Square] = None,
+                  arrows: Iterable[Union[Arrow, Tuple[Square, Square]]] = [],
+                  arrow_style: ArrowStyle = "lichess",
+                  fill: Dict[Square, str] = {},
+                  squares: Optional[IntoSquareSet] = None,
+                  size: Optional[int] = None,
+                  coordinates: bool = True,
+                  colors: Dict[str, str] = {},
+                  borders: bool = False,
+                  style: Optional[str] = None,
+                  piece_set: Optional[str] = None,
+                  legal_moves: Iterable[chess.Move] = (),
+                  legal_move_style: LegalMoveStyle = "lichess",
+                  user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
     """
     Renders a board with pieces and/or selected squares as an SVG image.
 
@@ -662,9 +703,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         or ``#15781B80`` (transparent).
     :param borders: Pass ``True`` to enable a border around the board and,
        (if *coordinates* is enabled) the coordinate margin.
-    :param style: A CSS stylesheet to include in the SVG image. Annotation
-        bounds describe the renderer's built-in geometry; custom CSS that
-        changes overlay geometry is not reflected in those bounds.
+    :param style: A CSS stylesheet to include in the SVG image.
     :param legal_moves: Legal moves from one source square whose destinations
         should be marked. Promotion variants sharing a destination are
         deduplicated. Lichess-style castling shows both the king destination
@@ -1190,7 +1229,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                 kind="arrow",
                 color=annotation_color,
                 bbox_xyxy=_points_bbox(primitive_points),
-                anchor_bbox_xyxy=_arrow_anchor_bbox(
+                arrowhead_bbox_xyxy=_arrowhead_bbox(
                     tail,
                     head,
                     orientation=orientation,

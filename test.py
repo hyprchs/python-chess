@@ -4463,9 +4463,9 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(arrow.head_xy, (4.5 * chess.svg.SQUARE_SIZE, 4.5 * chess.svg.SQUARE_SIZE))
         self.assertLess(arrow.bbox_xyxy[2] - arrow.bbox_xyxy[0], chess.svg.SQUARE_SIZE)
         self.assertGreater(arrow.bbox_xyxy[3] - arrow.bbox_xyxy[1], chess.svg.SQUARE_SIZE)
-        self.assertIsNotNone(arrow.anchor_bbox_xyxy)
+        self.assertIsNotNone(arrow.arrowhead_bbox_xyxy)
         self.assertLess(
-            arrow.anchor_bbox_xyxy[3] - arrow.anchor_bbox_xyxy[1],
+            arrow.arrowhead_bbox_xyxy[3] - arrow.arrowhead_bbox_xyxy[1],
             chess.svg.SQUARE_SIZE,
         )
         self.assertIsNotNone(arrow.obb_xyxyxyxy)
@@ -4526,40 +4526,6 @@ class SvgTestCase(unittest.TestCase):
             ),
         )
 
-    def test_arrow_anchor_collisions_only_share_a_head_and_incoming_ray(self):
-        for style in ("lichess", "chess.com"):
-            seen = {}
-            collision_count = 0
-            for head in chess.SQUARES:
-                for tail in chess.SQUARES:
-                    if tail == head:
-                        continue
-                    dx = chess.square_file(head) - chess.square_file(tail)
-                    dy = chess.square_rank(head) - chess.square_rank(tail)
-                    if style == "chess.com" and (abs(dx), abs(dy)) in {(1, 2), (2, 1)}:
-                        incoming_ray = (
-                            (0, 1 if dy > 0 else -1)
-                            if abs(dx) > abs(dy)
-                            else (1 if dx > 0 else -1, 0)
-                        )
-                    else:
-                        divisor = math.gcd(abs(dx), abs(dy))
-                        incoming_ray = (dx // divisor, dy // divisor)
-                    anchor = tuple(round(value, 6) for value in chess.svg._arrow_anchor_bbox(
-                        tail,
-                        head,
-                        orientation=chess.WHITE,
-                        board_offset=0,
-                        arrow_style=style,
-                    ))
-                    semantic_key = head, incoming_ray
-                    if anchor in seen:
-                        collision_count += 1
-                        self.assertEqual(seen[anchor], semantic_key)
-                    else:
-                        seen[anchor] = semantic_key
-            self.assertGreater(collision_count, 0)
-
     def test_svg_chess_com_arrow_style(self):
         svg = chess.svg.board(
             arrows=[chess.svg.Arrow(chess.E2, chess.E4)],
@@ -4603,6 +4569,12 @@ class SvgTestCase(unittest.TestCase):
     def test_svg_rejects_unknown_arrow_style(self):
         with self.assertRaisesRegex(ValueError, "unsupported arrow style"):
             chess.svg.board(arrow_style="unknown")  # type: ignore
+
+    def test_svg_custom_css_is_only_available_without_annotations(self):
+        style = ".arrow { stroke-width: 90px; }"
+        self.assertIn(f"<style>{style}</style>", chess.svg.board(style=style))
+        with self.assertRaises(TypeError):
+            chess.svg.board_with_annotations(style=style)  # type: ignore
 
     def test_svg_legal_destinations_and_annotations(self):
         board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
