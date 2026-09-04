@@ -288,9 +288,10 @@ def _color(color: str) -> Tuple[str, float]:
     return color, 1.0
 
 
-def _is_opaque_color(color: str, opacity: float) -> bool:
+def _is_valid_color(color: str, opacity: float, *, require_opaque: bool) -> bool:
     normalized = color.strip().lower()
-    return opacity == 1.0 and (
+    valid_opacity = opacity == 1.0 if require_opaque else opacity > 0.0
+    return valid_opacity and (
         normalized in _CSS_NAMED_COLORS
         or (
             len(normalized) in (4, 7)
@@ -1010,10 +1011,12 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         else:
             color, opacity = _color(arrow_color)
         if arrow_style == "lichess":
-            if not _is_opaque_color(color, opacity):
+            if not _is_valid_color(color, opacity, require_opaque=True):
                 raise ValueError("lichess arrow colors must be opaque hex or named colors")
             assert lichess_shapes is not None
             arrow_parent = lichess_shapes
+        elif not _is_valid_color(color, opacity, require_opaque=False):
+            raise ValueError("chess.com arrow colors must be visible hex or named colors")
 
         tail_file = chess.square_file(tail)
         tail_rank = chess.square_rank(tail)

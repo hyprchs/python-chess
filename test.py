@@ -4633,6 +4633,16 @@ class SvgTestCase(unittest.TestCase):
         self.assertIn('fill="#010203"', svg)
         self.assertIn(f'opacity="{4 / 255}"', svg)
 
+    def test_svg_chess_com_requires_a_visible_color(self):
+        for color in ("none", "transparent", "#0000", "#00000000", "", "bogus"):
+            with self.subTest(color=color), self.assertRaisesRegex(
+                ValueError, "must be visible hex or named colors"
+            ):
+                chess.svg.board_with_annotations(
+                    arrows=[chess.svg.Arrow(chess.E2, chess.E4, color=color)],
+                    arrow_style="chess.com",
+                )
+
     def test_svg_rejects_unknown_arrow_style(self):
         with self.assertRaisesRegex(ValueError, "unsupported arrow style"):
             chess.svg.board(arrow_style="unknown")  # type: ignore
