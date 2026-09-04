@@ -629,8 +629,9 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         square is drawn as a circle, like ``[(chess.E2, chess.E2)]``.
     :param arrow_style: The arrow geometry and default palette. ``"lichess"``
         (the default) uses rounded shafts with triangular markers, matching
-        Chessground. ``"chess.com"`` uses filled polygons and renders knight
-        moves as L-shaped arrows.
+        Chessground. All Lichess arrows share the site's opacity layer, so
+        custom arrow colors must be opaque. ``"chess.com"`` uses filled
+        polygons and renders knight moves as L-shaped arrows.
     :param fill: A dictionary mapping squares to a colors that they should be
         filled with.
     :param squares: A :class:`chess.SquareSet` with selected squares to mark
