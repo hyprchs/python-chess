@@ -39,7 +39,11 @@ class UserHighlight:
 
 @dataclass(frozen=True)
 class OverlayAnnotation:
-    """Semantic bounds for a primitive emitted by :func:`board_with_annotations`."""
+    """Semantic bounds for a primitive emitted by :func:`board_with_annotations`.
+
+    Straight-arrow OBBs align with the tail-to-head axis. Chess.com knight
+    arrows and same-square circles use board-aligned bounds.
+    """
 
     kind: Literal[
         "arrow",
@@ -333,66 +337,34 @@ def _normalize_legal_moves(
     return tuple(normalized)
 
 
-def _minimum_area_box(
+def _oriented_box(
     points: Iterable[Tuple[float, float]],
+    direction: Tuple[float, float],
 ) -> Tuple[
     Tuple[float, float],
     Tuple[float, float],
     Tuple[float, float],
     Tuple[float, float],
 ]:
-    """Minimum-area rectangle around a rendered primitive."""
-    unique = sorted(set(points))
-    if len(unique) < 3:
+    """Tight enclosing rectangle aligned with *direction*."""
+    points = tuple(points)
+    if len(points) < 3:
         raise ValueError("oriented bounds require at least three points")
-
-    def cross(
-        origin: Tuple[float, float],
-        first: Tuple[float, float],
-        second: Tuple[float, float],
-    ) -> float:
-        return ((first[0] - origin[0]) * (second[1] - origin[1])
-                - (first[1] - origin[1]) * (second[0] - origin[0]))
-
-    lower: list[Tuple[float, float]] = []
-    for point in unique:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
-            lower.pop()
-        lower.append(point)
-    upper: list[Tuple[float, float]] = []
-    for point in reversed(unique):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
-            upper.pop()
-        upper.append(point)
-    hull = lower[:-1] + upper[:-1]
-
-    best_area = math.inf
-    best_box: Tuple[
-        Tuple[float, float],
-        Tuple[float, float],
-        Tuple[float, float],
-        Tuple[float, float],
-    ] | None = None
-    for start, end in zip(hull, hull[1:] + hull[:1]):
-        dx, dy = end[0] - start[0], end[1] - start[1]
-        length = math.hypot(dx, dy)
-        ux, uy = dx / length, dy / length
-        vx, vy = -uy, ux
-        along = [x * ux + y * uy for x, y in hull]
-        across = [x * vx + y * vy for x, y in hull]
-        lo_u, hi_u = min(along), max(along)
-        lo_v, hi_v = min(across), max(across)
-        area = (hi_u - lo_u) * (hi_v - lo_v)
-        if area < best_area:
-            best_area = area
-            best_box = (
-                (lo_u * ux + lo_v * vx, lo_u * uy + lo_v * vy),
-                (hi_u * ux + lo_v * vx, hi_u * uy + lo_v * vy),
-                (hi_u * ux + hi_v * vx, hi_u * uy + hi_v * vy),
-                (lo_u * ux + hi_v * vx, lo_u * uy + hi_v * vy),
-            )
-    assert best_box is not None
-    return best_box
+    length = math.hypot(*direction)
+    if not length:
+        raise ValueError("oriented bounds require a direction")
+    ux, uy = direction[0] / length, direction[1] / length
+    vx, vy = -uy, ux
+    along = [x * ux + y * uy for x, y in points]
+    across = [x * vx + y * vy for x, y in points]
+    lo_u, hi_u = min(along), max(along)
+    lo_v, hi_v = min(across), max(across)
+    return (
+        (lo_u * ux + lo_v * vx, lo_u * uy + lo_v * vy),
+        (hi_u * ux + lo_v * vx, hi_u * uy + lo_v * vy),
+        (hi_u * ux + hi_v * vx, hi_u * uy + hi_v * vy),
+        (lo_u * ux + hi_v * vx, lo_u * uy + hi_v * vy),
+    )
 
 
 def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, float, float]:
@@ -1037,6 +1009,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         yhead = board_offset + (7.5 - head_rank if orientation else head_rank + 0.5) * SQUARE_SIZE
 
         if (head_file, head_rank) == (tail_file, tail_rank):
+            arrow_direction = (1.0, 0.0)
             radius = SQUARE_SIZE * 0.5
             ET.SubElement(arrow_parent, "circle", _attrs({
                 "cx": xhead,
@@ -1074,6 +1047,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             })
 
             dx, dy = xhead - xtail, yhead - ytail
+            arrow_direction = (dx, dy)
             hypot = math.hypot(dx, dy)
             margin = SQUARE_SIZE * 10 / 64
             ux, uy = dx / hypot, dy / hypot
@@ -1128,6 +1102,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
 
             dx, dy = xhead - xtail, yhead - ytail
             is_knight_move = (abs(head_file - tail_file), abs(head_rank - tail_rank)) in [(1, 2), (2, 1)]
+            arrow_direction = (1.0, 0.0) if is_knight_move else (dx, dy)
             if is_knight_move:
                 if abs(dx) > abs(dy):
                     ux, uy = math.copysign(1.0, dx), 0.0
@@ -1188,7 +1163,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         annotation_color: CanonicalOverlayColor | None = (
             arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
         )
-        arrow_obb = _minimum_area_box(primitive_points)
+        arrow_obb = _oriented_box(primitive_points, arrow_direction)
         annotations.append(
             OverlayAnnotation(
                 kind="arrow",

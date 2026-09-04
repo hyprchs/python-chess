@@ -4504,7 +4504,7 @@ class SvgTestCase(unittest.TestCase):
                 ]
             )
 
-    def test_svg_crossing_arrows_have_distinct_oriented_bounds(self):
+    def test_svg_crossing_arrows_have_arrow_aligned_bounds(self):
         rendered = chess.svg.board_with_annotations(
             arrows=[
                 chess.svg.Arrow(chess.E4, chess.D5),
@@ -4533,19 +4533,19 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(
             tuple(tuple(round(value, 6) for value in point) for point in first.obb_xyxyxyxy),
             (
-                (173.389551, 147.972284),
-                (208.309721, 203.840506),
-                (185.070836, 218.365862),
-                (150.150666, 162.497640),
+                (195.042233, 214.929611),
+                (147.804903, 167.692281),
+                (167.692281, 147.804903),
+                (214.929611, 195.042233),
             ),
         )
         self.assertEqual(
             tuple(tuple(round(value, 6) for value in point) for point in second.obb_xyxyxyxy),
             (
-                (151.690279, 203.840506),
-                (186.610449, 147.972284),
-                (209.849334, 162.497640),
-                (174.929164, 218.365862),
+                (145.070389, 195.042233),
+                (192.307719, 147.804903),
+                (212.195097, 167.692281),
+                (164.957767, 214.929611),
             ),
         )
 
