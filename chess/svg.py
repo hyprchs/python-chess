@@ -665,7 +665,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
     >>> chess.svg.board(
     ...     board,
     ...     fill=dict.fromkeys(board.attacks(chess.E4), "#cc0000cc"),
-    ...     arrows=[chess.svg.Arrow(chess.E4, chess.F6, color="#0000cccc")],
+    ...     arrows=[chess.svg.Arrow(chess.E4, chess.F6, color="#0000cc")],
     ...     squares=chess.SquareSet(chess.BB_DARK_SQUARES & chess.BB_FILE_B),
     ...     size=350,
     ... )  # doctest: +SKIP
@@ -1003,12 +1003,15 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
             color, opacity = _color(CHESS_COM_ARROW_COLORS[color_key])
         elif arrow_style == "lichess" and color_key in LICHESS_ARROW_COLORS:
             color, opacity = _color(LICHESS_ARROW_COLORS[color_key])
-            assert lichess_shapes is not None
-            arrow_parent = lichess_shapes
         elif color_key in DEFAULT_COLORS:
             color, opacity = _color(DEFAULT_COLORS[color_key])
         else:
             color, opacity = _color(arrow_color)
+        if arrow_style == "lichess":
+            if opacity < 1.0:
+                raise ValueError("lichess arrow colors must not specify per-arrow alpha")
+            assert lichess_shapes is not None
+            arrow_parent = lichess_shapes
 
         tail_file = chess.square_file(tail)
         tail_rank = chess.square_rank(tail)

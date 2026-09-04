@@ -4443,7 +4443,7 @@ class SvgTestCase(unittest.TestCase):
     def test_svg_lichess_arrows_share_one_opacity_layer(self):
         rendered = chess.svg.board_with_annotations(
             arrows=[
-                chess.svg.Arrow(chess.E2, chess.E4),
+                chess.svg.Arrow(chess.E2, chess.E4, color="#123456"),
                 chess.svg.Arrow(chess.E3, chess.E5),
             ],
             coordinates=False,
@@ -4455,7 +4455,7 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(layer.get("opacity"), "0.6")
         lines = layer.findall(f"{namespace}line")
         self.assertEqual(len(lines), 2)
-        self.assertTrue(all(line.get("stroke") == "#15781B" for line in lines))
+        self.assertEqual([line.get("stroke") for line in lines], ["#123456", "#15781B"])
         self.assertTrue(all(line.get("opacity") is None for line in lines))
 
         arrow = rendered.annotations[0]
@@ -4470,6 +4470,13 @@ class SvgTestCase(unittest.TestCase):
         )
         self.assertIsNotNone(arrow.obb_xyxyxyxy)
         self.assertEqual(len(arrow.obb_xyxyxyxy), 4)
+
+    def test_svg_lichess_rejects_per_arrow_alpha(self):
+        with self.assertRaisesRegex(ValueError, "must not specify per-arrow alpha"):
+            chess.svg.board(
+                arrows=[chess.svg.Arrow(chess.E2, chess.E4, color="#12345680")],
+                arrow_style="lichess",
+            )
 
     def test_svg_crossing_arrows_have_distinct_oriented_bounds(self):
         rendered = chess.svg.board_with_annotations(
