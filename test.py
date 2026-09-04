@@ -4668,6 +4668,25 @@ class SvgTestCase(unittest.TestCase):
                     ],
                 )
 
+        board = chess.Board("4k3/8/8/8/8/8/8/6KR w H - 0 1", chess960=True)
+        rendered = chess.svg.board_with_annotations(
+            board,
+            coordinates=False,
+            legal_moves=[chess.Move.from_uci("g1h1")],
+            legal_move_style="lichess",
+        )
+        self.assertEqual(
+            [annotation.kind for annotation in rendered.annotations],
+            ["legal_destination_capture"],
+        )
+        self.assertEqual(
+            tuple(
+                round(value / chess.svg.SQUARE_SIZE, 1)
+                for value in rendered.annotations[0].bbox_xyxy
+            ),
+            (7.0, 7.0, 8.0, 8.0),
+        )
+
     def test_svg_chess_com_legal_destinations_match_live_geometry(self):
         board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
         rendered = chess.svg.board_with_annotations(

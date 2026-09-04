@@ -308,13 +308,15 @@ def _normalize_legal_moves(
         destinations = (move,)
         if legal_move_style == "lichess" and board.is_castling(move):
             # Chessground exposes both accepted castling gestures.
-            king_file = 6 if board.is_kingside_castling(move) else 2
+            king_square = chess.square(
+                6 if board.is_kingside_castling(move) else 2,
+                chess.square_rank(move.from_square),
+            )
+            rook_destination = board._to_chess960(move)
             destinations = (
-                chess.Move(
-                    move.from_square,
-                    chess.square(king_file, chess.square_rank(move.from_square)),
-                ),
-                board._to_chess960(move),
+                (chess.Move(move.from_square, king_square), rook_destination)
+                if king_square != move.from_square
+                else (rook_destination,)
             )
         for destination in destinations:
             if destination.to_square in seen_destinations:
