@@ -4,6 +4,7 @@ import base64
 import math
 import uuid
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -17,6 +18,59 @@ SQUARE_SIZE = 45
 MARGIN = 20
 
 ArrowStyle = Literal["lichess", "chess.com"]
+LegalMoveStyle = Literal["lichess", "chess.com"]
+CanonicalOverlayColor = Literal["green", "red", "yellow", "blue"]
+
+
+@dataclass(frozen=True)
+class UserHighlight:
+    """A Lichess-style circular user highlight with a site color palette."""
+
+    square: Square
+    color: CanonicalOverlayColor
+    palette: LegalMoveStyle = "lichess"
+
+    def __post_init__(self) -> None:
+        if self.color not in {"green", "red", "yellow", "blue"}:
+            raise ValueError(f"unsupported user highlight color: {self.color!r}")
+        if self.palette not in {"lichess", "chess.com"}:
+            raise ValueError(f"unsupported user highlight palette: {self.palette!r}")
+
+
+@dataclass(frozen=True)
+class OverlayAnnotation:
+    """Semantic bounds for a primitive emitted by :func:`board_with_annotations`.
+
+    Straight-arrow OBBs align with the tail-to-head axis. Chess.com knight
+    arrows and same-square circles use board-aligned bounds.
+    """
+
+    kind: Literal[
+        "arrow",
+        "user_highlight",
+        "legal_destination_dot",
+        "legal_destination_capture",
+    ]
+    bbox_xyxy: Tuple[float, float, float, float]
+    arrowhead_bbox_xyxy: Optional[Tuple[float, float, float, float]] = None
+    color: Optional[CanonicalOverlayColor] = None
+    tail_xy: Optional[Tuple[float, float]] = None
+    head_xy: Optional[Tuple[float, float]] = None
+    obb_xyxyxyxy: Optional[Tuple[
+        Tuple[float, float],
+        Tuple[float, float],
+        Tuple[float, float],
+        Tuple[float, float],
+    ]] = None
+
+
+@dataclass(frozen=True)
+class BoardRenderResult:
+    """The SVG board and annotations generated from its exact SVG primitives."""
+
+    svg: "SvgWrapper"
+    viewbox_size: int
+    annotations: Tuple[OverlayAnnotation, ...]
 
 
 @lru_cache(maxsize=1)
@@ -93,6 +147,29 @@ CHESS_COM_ARROW_COLORS = {
     "arrow yellow": "#ffaa00a3",
     "arrow blue": "#48c1f9a3",
 }
+
+LICHESS_ARROW_COLORS = {
+    "arrow green": "#15781B",
+    "arrow red": "#882020",
+    "arrow yellow": "#e68f00",
+    "arrow blue": "#003088",
+}
+
+_CSS_NAMED_COLORS = frozenset("""
+    aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+    burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod
+    darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue
+    darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen
+    fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred
+    indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray
+    lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen
+    linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred
+    midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid
+    palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple
+    red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue
+    slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat
+    white whitesmoke yellow yellowgreen
+""".split())
 
 
 class Arrow:
@@ -211,6 +288,124 @@ def _color(color: str) -> Tuple[str, float]:
     return color, 1.0
 
 
+def _is_valid_color(color: str, opacity: float, *, require_opaque: bool) -> bool:
+    normalized = color.strip().lower()
+    valid_opacity = opacity == 1.0 if require_opaque else opacity > 0.0
+    return valid_opacity and (
+        normalized in _CSS_NAMED_COLORS
+        or (
+            len(normalized) in (4, 7)
+            and normalized.startswith("#")
+            and all(character in "0123456789abcdef" for character in normalized[1:])
+        )
+    )
+
+
+def _square_origin(square: Square, *, orientation: Color, board_offset: int) -> Tuple[float, float]:
+    file_index = chess.square_file(square)
+    rank_index = chess.square_rank(square)
+    return (
+        board_offset + (file_index if orientation else 7 - file_index) * SQUARE_SIZE,
+        board_offset + (7 - rank_index if orientation else rank_index) * SQUARE_SIZE,
+    )
+
+
+def _square_center(square: Square, *, orientation: Color, board_offset: int) -> Tuple[float, float]:
+    x, y = _square_origin(square, orientation=orientation, board_offset=board_offset)
+    return x + SQUARE_SIZE / 2, y + SQUARE_SIZE / 2
+
+
+def _box_from_center(cx: float, cy: float, radius: float) -> Tuple[float, float, float, float]:
+    return cx - radius, cy - radius, cx + radius, cy + radius
+
+
+def _normalize_legal_moves(
+    board: Optional[chess.BaseBoard],
+    legal_moves: Iterable[chess.Move],
+    *,
+    legal_move_style: LegalMoveStyle,
+) -> Tuple[Tuple[chess.Move, Literal["legal_destination_dot", "legal_destination_capture"]], ...]:
+    requested = tuple(legal_moves)
+    if not requested:
+        return ()
+    if not isinstance(board, chess.Board):
+        raise ValueError("legal_moves require a chess.Board")
+    source_squares = {move.from_square for move in requested}
+    if len(source_squares) != 1:
+        raise ValueError("legal_moves must share one source square")
+    seen_destinations: set[Square] = set()
+    normalized: list[Tuple[chess.Move, Literal["legal_destination_dot", "legal_destination_capture"]]] = []
+    for move in requested:
+        if move not in board.legal_moves:
+            raise ValueError(f"legal_moves contains an illegal move: {move.uci()}")
+        destinations = (move,)
+        if legal_move_style == "lichess" and board.is_castling(move):
+            # Chessground exposes both accepted castling gestures.
+            king_square = chess.square(
+                6 if board.is_kingside_castling(move) else 2,
+                chess.square_rank(move.from_square),
+            )
+            rook_destination = board._to_chess960(move)
+            destinations = (
+                (chess.Move(move.from_square, king_square), rook_destination)
+                if king_square != move.from_square
+                else (rook_destination,)
+            )
+        for destination in destinations:
+            if destination.to_square in seen_destinations:
+                continue
+            seen_destinations.add(destination.to_square)
+            normalized.append(
+                (
+                    destination,
+                    "legal_destination_dot"
+                    if board.piece_at(destination.to_square) is None
+                    else "legal_destination_capture",
+                )
+            )
+    return tuple(normalized)
+
+
+def _oriented_box(
+    points: Iterable[Tuple[float, float]],
+    direction: Tuple[float, float],
+) -> Tuple[
+    Tuple[float, float],
+    Tuple[float, float],
+    Tuple[float, float],
+    Tuple[float, float],
+]:
+    """Tight enclosing rectangle aligned with *direction*."""
+    points = tuple(points)
+    if len(points) < 3:
+        raise ValueError("oriented bounds require at least three points")
+    length = math.hypot(*direction)
+    if not length:
+        raise ValueError("oriented bounds require a direction")
+    ux, uy = direction[0] / length, direction[1] / length
+    vx, vy = -uy, ux
+    along = [x * ux + y * uy for x, y in points]
+    across = [x * vx + y * vy for x, y in points]
+    lo_u, hi_u = min(along), max(along)
+    lo_v, hi_v = min(across), max(across)
+    return (
+        (lo_u * ux + lo_v * vx, lo_u * uy + lo_v * vy),
+        (hi_u * ux + lo_v * vx, hi_u * uy + lo_v * vy),
+        (hi_u * ux + hi_v * vx, hi_u * uy + hi_v * vy),
+        (lo_u * ux + hi_v * vx, lo_u * uy + hi_v * vy),
+    )
+
+
+def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, float, float]:
+    points = tuple(points)
+    return (
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
+    )
+
+
 def _coord(text: str, x: int, y: int, width: int, height: int, horizontal: bool, margin: int, *, color: str, opacity: float) -> ET.Element:
     scale = margin / MARGIN
 
@@ -325,9 +520,13 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           colors: Dict[str, str] = {},
           borders: bool = False,
           style: Optional[str] = None,
-          piece_set: Optional[str] = None) -> str:
+          piece_set: Optional[str] = None,
+          legal_moves: Iterable[chess.Move] = (),
+          legal_move_style: LegalMoveStyle = "lichess",
+          user_highlights: Iterable[UserHighlight] = ()) -> "SvgWrapper":
     """
     Renders a board with pieces and/or selected squares as an SVG image.
+    Use :func:`board_with_annotations` when semantic overlay bounds are needed.
 
     :param board: A :class:`chess.BaseBoard` for a chessboard with pieces, or
         ``None`` (the default) for a chessboard without pieces.
@@ -340,8 +539,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         square is drawn as a circle, like ``[(chess.E2, chess.E2)]``.
     :param arrow_style: The arrow geometry and default palette. ``"lichess"``
         (the default) uses rounded shafts with triangular markers, matching
-        Chessground. ``"chess.com"`` uses filled polygons and renders knight
-        moves as L-shaped arrows.
+        Chessground. All Lichess arrows share the site's opacity layer, so
+        custom arrow colors must be opaque. ``"chess.com"`` uses filled
+        polygons and renders knight moves as L-shaped arrows.
     :param fill: A dictionary mapping squares to a colors that they should be
         filled with.
     :param squares: A :class:`chess.SquareSet` with selected squares to mark
@@ -358,6 +558,14 @@ def board(board: Optional[chess.BaseBoard] = None, *,
     :param borders: Pass ``True`` to enable a border around the board and,
        (if *coordinates* is enabled) the coordinate margin.
     :param style: A CSS stylesheet to include in the SVG image.
+    :param legal_moves: Legal moves from one source square whose destinations
+        should be marked. Promotion variants sharing a destination are
+        deduplicated. Lichess-style castling shows both the king destination
+        and the rook square.
+    :param legal_move_style: The legal-destination geometry, either
+        ``"lichess"`` (the default) or ``"chess.com"``.
+    :param user_highlights: Foreground square-circle annotations with canonical
+        colors and a Lichess or Chess.com palette.
 
     >>> import chess
     >>> import chess.svg
@@ -367,7 +575,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
     >>> chess.svg.board(
     ...     board,
     ...     fill=dict.fromkeys(board.attacks(chess.E4), "#cc0000cc"),
-    ...     arrows=[chess.svg.Arrow(chess.E4, chess.F6, color="#0000cccc")],
+    ...     arrows=[chess.svg.Arrow(chess.E4, chess.F6, color="#0000cc")],
     ...     squares=chess.SquareSet(chess.BB_DARK_SQUARES & chess.BB_FILE_B),
     ...     size=350,
     ... )  # doctest: +SKIP
@@ -375,8 +583,106 @@ def board(board: Optional[chess.BaseBoard] = None, *,
     .. image:: ../docs/Ne4.svg
         :alt: 8/8/8/8/4N3/8/8/8
     """
+    return _render_board(
+        board,
+        orientation=orientation,
+        lastmove=lastmove,
+        check=check,
+        arrows=arrows,
+        arrow_style=arrow_style,
+        fill=fill,
+        squares=squares,
+        size=size,
+        coordinates=coordinates,
+        colors=colors,
+        borders=borders,
+        style=style,
+        piece_set=piece_set,
+        legal_moves=legal_moves,
+        legal_move_style=legal_move_style,
+        user_highlights=user_highlights,
+    ).svg
+
+
+def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
+                           orientation: Color = chess.WHITE,
+                           lastmove: Optional[chess.Move] = None,
+                           check: Optional[Square] = None,
+                           arrows: Iterable[Union[Arrow, Tuple[Square, Square]]] = [],
+                           arrow_style: ArrowStyle = "lichess",
+                           fill: Dict[Square, str] = {},
+                           squares: Optional[IntoSquareSet] = None,
+                           size: Optional[int] = None,
+                           coordinates: bool = True,
+                           colors: Dict[str, str] = {},
+                           borders: bool = False,
+                           piece_set: Optional[str] = None,
+                           legal_moves: Iterable[chess.Move] = (),
+                           legal_move_style: LegalMoveStyle = "lichess",
+                           user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
+    """Renders a board SVG with renderer-owned semantic overlay geometry.
+
+    Parameters match :func:`board`, except arbitrary CSS ``style`` is
+    deliberately unavailable because it could invalidate the returned bounds.
+    """
+    return _render_board(
+        board,
+        orientation=orientation,
+        lastmove=lastmove,
+        check=check,
+        arrows=arrows,
+        arrow_style=arrow_style,
+        fill=fill,
+        squares=squares,
+        size=size,
+        coordinates=coordinates,
+        colors=colors,
+        borders=borders,
+        piece_set=piece_set,
+        legal_moves=legal_moves,
+        legal_move_style=legal_move_style,
+        user_highlights=user_highlights,
+    )
+
+
+def _render_board(board: Optional[chess.BaseBoard] = None, *,
+                  orientation: Color = chess.WHITE,
+                  lastmove: Optional[chess.Move] = None,
+                  check: Optional[Square] = None,
+                  arrows: Iterable[Union[Arrow, Tuple[Square, Square]]] = [],
+                  arrow_style: ArrowStyle = "lichess",
+                  fill: Dict[Square, str] = {},
+                  squares: Optional[IntoSquareSet] = None,
+                  size: Optional[int] = None,
+                  coordinates: bool = True,
+                  colors: Dict[str, str] = {},
+                  borders: bool = False,
+                  style: Optional[str] = None,
+                  piece_set: Optional[str] = None,
+                  legal_moves: Iterable[chess.Move] = (),
+                  legal_move_style: LegalMoveStyle = "lichess",
+                  user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
+    """Builds the shared SVG and annotation result for the public renderers."""
     if arrow_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported arrow style: {arrow_style!r}")
+    if legal_move_style not in ["lichess", "chess.com"]:
+        raise ValueError(f"unsupported legal move style: {legal_move_style!r}")
+    legal_destinations = _normalize_legal_moves(
+        board, legal_moves, legal_move_style=legal_move_style
+    )
+    arrows = tuple(arrows)
+    highlights = tuple(user_highlights)
+    if any(not isinstance(highlight, UserHighlight) for highlight in highlights):
+        raise TypeError("user_highlights must contain UserHighlight values")
+    highlight_palettes: Dict[Square, LegalMoveStyle] = {}
+    for highlight in highlights:
+        if (
+            highlight.square in highlight_palettes
+            and highlight_palettes[highlight.square] != highlight.palette
+        ):
+            raise ValueError("user highlights on one square must use one palette")
+        highlight_palettes[highlight.square] = highlight.palette
+    annotations: list[OverlayAnnotation] = []
 
     inner_border = 1 if borders and coordinates else 0
     outer_border = 1 if borders else 0
@@ -525,6 +831,90 @@ def board(board: Optional[chess.BaseBoard] = None, *,
             "fill": "url(#check_gradient)",
         }))
 
+    # Legal destinations are board-local UI hints. Both source sites render
+    # them underneath the piece layer, so capture rings remain visible around
+    # the target piece rather than obscuring it.
+    for move, kind in legal_destinations:
+        cx, cy = _square_center(
+            move.to_square, orientation=orientation, board_offset=board_offset
+        )
+        if legal_move_style == "lichess":
+            if kind == "legal_destination_dot":
+                radius = SQUARE_SIZE * 0.19
+                ET.SubElement(svg, "circle", _attrs({
+                    "cx": cx,
+                    "cy": cy,
+                    "r": radius,
+                    "fill": "#14551e",
+                    "opacity": 0.5,
+                    "class": "legal-destination lichess dot",
+                }))
+                bbox = _box_from_center(cx, cy, radius)
+            else:
+                x, y = _square_origin(
+                    move.to_square, orientation=orientation, board_offset=board_offset
+                )
+                gradient_id = f"legal-capture-{uuid.uuid4().hex}"
+                # CSS radial-gradient() defaults to farthest-corner. Match
+                # Chessground's 80% stop against that radius, not SVG's 50%
+                # object-bounding-box default.
+                gradient = ET.SubElement(defs, "radialGradient", _attrs({
+                    "id": gradient_id,
+                    "gradientUnits": "userSpaceOnUse",
+                    "cx": cx,
+                    "cy": cy,
+                    "r": SQUARE_SIZE / math.sqrt(2),
+                }))
+                ET.SubElement(gradient, "stop", {
+                    "offset": "0%", "stop-color": "#145500", "stop-opacity": "0",
+                })
+                ET.SubElement(gradient, "stop", {
+                    "offset": "80%", "stop-color": "#145500", "stop-opacity": "0",
+                })
+                ET.SubElement(gradient, "stop", {
+                    "offset": "80%", "stop-color": "#145500", "stop-opacity": "0.3",
+                })
+                ET.SubElement(gradient, "stop", {
+                    "offset": "100%", "stop-color": "#145500", "stop-opacity": "0.3",
+                })
+                ET.SubElement(svg, "rect", _attrs({
+                    "x": x,
+                    "y": y,
+                    "width": SQUARE_SIZE,
+                    "height": SQUARE_SIZE,
+                    "fill": f"url(#{gradient_id})",
+                    "class": "legal-destination lichess capture",
+                }))
+                bbox = (x, y, x + SQUARE_SIZE, y + SQUARE_SIZE)
+        elif kind == "legal_destination_dot":
+            # Chess.com's .hint uses 4.2% board-width padding. At eight files
+            # this leaves a radius of (1 - 2 * .336) / 2 = .164 squares.
+            radius = SQUARE_SIZE * 0.164
+            ET.SubElement(svg, "circle", _attrs({
+                "cx": cx,
+                "cy": cy,
+                "r": radius,
+                "fill": "#000000",
+                "opacity": 0.14,
+                "class": "legal-destination chess-com dot",
+            }))
+            bbox = _box_from_center(cx, cy, radius)
+        else:
+            radius = SQUARE_SIZE * 0.456
+            stroke_width = SQUARE_SIZE * 0.088
+            ET.SubElement(svg, "circle", _attrs({
+                "cx": cx,
+                "cy": cy,
+                "r": radius,
+                "fill": "none",
+                "stroke": "#000000",
+                "stroke-width": stroke_width,
+                "opacity": 0.14,
+                "class": "legal-destination chess-com capture",
+            }))
+            bbox = _box_from_center(cx, cy, radius + stroke_width / 2)
+        annotations.append(OverlayAnnotation(kind=kind, bbox_xyxy=bbox))
+
     # Render pieces and selected squares.
     for square, bb in enumerate(chess.BB_SQUARES):
         file_index = chess.square_file(square)
@@ -555,6 +945,48 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "y": y,
             }))
 
+    lichess_shapes = (
+        ET.Element("g", {"class": "shapes lichess", "opacity": "0.6"})
+        if any(highlight.palette == "lichess" for highlight in highlights)
+        or (arrow_style == "lichess" and bool(arrows))
+        else None
+    )
+
+    # User highlights are foreground circles, matching Lichess's annotated
+    # square geometry. The palette intentionally changes only color, never
+    # the class geometry.
+    for highlight in highlights:
+        cx, cy = _square_center(
+            highlight.square, orientation=orientation, board_offset=board_offset
+        )
+        color_key = f"arrow {highlight.color}"
+        palette = CHESS_COM_ARROW_COLORS if highlight.palette == "chess.com" else LICHESS_ARROW_COLORS
+        color, opacity = _color(palette[color_key])
+        parent = svg if highlight.palette == "chess.com" else lichess_shapes
+        assert parent is not None
+        radius = SQUARE_SIZE * 0.45
+        stroke_width = SQUARE_SIZE * 0.10
+        ET.SubElement(parent, "circle", _attrs({
+            "cx": cx,
+            "cy": cy,
+            "r": radius,
+            "fill": "none",
+            "stroke": color,
+            "stroke-width": stroke_width,
+            "opacity": opacity if opacity < 1.0 else None,
+            "class": f"user-highlight {highlight.palette.replace('.', '-')}",
+        }))
+        annotations.append(
+            OverlayAnnotation(
+                kind="user_highlight",
+                color=highlight.color,
+                bbox_xyxy=_box_from_center(cx, cy, radius + stroke_width / 2),
+            )
+        )
+
+    if lichess_shapes is not None:
+        svg.append(lichess_shapes)
+
     # Namespace marker IDs so multiple inline boards do not share definitions.
     marker_namespace = uuid.uuid4().hex
 
@@ -567,14 +999,24 @@ def board(board: Optional[chess.BaseBoard] = None, *,
             arrow_color = "green"
 
         color_key = " ".join(["arrow", arrow_color])
+        arrow_parent = svg
         if color_key in colors:
             color, opacity = _color(colors[color_key])
         elif arrow_style == "chess.com" and color_key in CHESS_COM_ARROW_COLORS:
             color, opacity = _color(CHESS_COM_ARROW_COLORS[color_key])
+        elif arrow_style == "lichess" and color_key in LICHESS_ARROW_COLORS:
+            color, opacity = _color(LICHESS_ARROW_COLORS[color_key])
         elif color_key in DEFAULT_COLORS:
             color, opacity = _color(DEFAULT_COLORS[color_key])
         else:
             color, opacity = _color(arrow_color)
+        if arrow_style == "lichess":
+            if not _is_valid_color(color, opacity, require_opaque=True):
+                raise ValueError("lichess arrow colors must be opaque hex or named colors")
+            assert lichess_shapes is not None
+            arrow_parent = lichess_shapes
+        elif not _is_valid_color(color, opacity, require_opaque=False):
+            raise ValueError("chess.com arrow colors must be visible hex or named colors")
 
         tail_file = chess.square_file(tail)
         tail_rank = chess.square_rank(tail)
@@ -587,7 +1029,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         yhead = board_offset + (7.5 - head_rank if orientation else head_rank + 0.5) * SQUARE_SIZE
 
         if (head_file, head_rank) == (tail_file, tail_rank):
-            ET.SubElement(svg, "circle", _attrs({
+            arrow_direction = (1.0, 0.0)
+            radius = SQUARE_SIZE * 0.5
+            ET.SubElement(arrow_parent, "circle", _attrs({
                 "cx": xhead,
                 "cy": yhead,
                 "r": SQUARE_SIZE * 0.9 / 2,
@@ -597,6 +1041,14 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "fill": "none",
                 "class": "circle",
             }))
+            primitive_points = (
+                (xhead - radius, yhead - radius),
+                (xhead + radius, yhead - radius),
+                (xhead + radius, yhead + radius),
+                (xhead - radius, yhead + radius),
+            )
+            primitive_bbox = _points_bbox(primitive_points)
+            arrowhead_bbox = None
         elif arrow_style == "lichess":
             marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
@@ -615,14 +1067,19 @@ def board(board: Optional[chess.BaseBoard] = None, *,
             })
 
             dx, dy = xhead - xtail, yhead - ytail
+            arrow_direction = (dx, dy)
             hypot = math.hypot(dx, dy)
             margin = SQUARE_SIZE * 10 / 64
+            ux, uy = dx / hypot, dy / hypot
+            px, py = -uy, ux
+            line_end_x = xhead - ux * margin
+            line_end_y = yhead - uy * margin
 
-            ET.SubElement(svg, "line", _attrs({
+            ET.SubElement(arrow_parent, "line", _attrs({
                 "x1": xtail,
                 "y1": ytail,
-                "x2": xhead - dx * margin / hypot,
-                "y2": yhead - dy * margin / hypot,
+                "x2": line_end_x,
+                "y2": line_end_y,
                 "stroke": color,
                 "opacity": opacity if opacity < 1.0 else None,
                 "stroke-width": SQUARE_SIZE * 10 / 64,
@@ -630,6 +1087,33 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                 "marker-end": f"url(#{marker_id})",
                 "class": "arrow lichess",
             }))
+            half_stroke = margin / 2
+            marker_points = (
+                (line_end_x - ux * 2.05 * margin - px * 2 * margin,
+                 line_end_y - uy * 2.05 * margin - py * 2 * margin),
+                (line_end_x - ux * 2.05 * margin + px * 2 * margin,
+                 line_end_y - uy * 2.05 * margin + py * 2 * margin),
+                (line_end_x + ux * 0.95 * margin,
+                 line_end_y + uy * 0.95 * margin),
+            )
+            primitive_points = (
+                (xtail - ux * half_stroke - px * half_stroke,
+                 ytail - uy * half_stroke - py * half_stroke),
+                (xtail - ux * half_stroke + px * half_stroke,
+                 ytail - uy * half_stroke + py * half_stroke),
+                (line_end_x + ux * half_stroke - px * half_stroke,
+                 line_end_y + uy * half_stroke - py * half_stroke),
+                (line_end_x + ux * half_stroke + px * half_stroke,
+                 line_end_y + uy * half_stroke + py * half_stroke),
+            ) + marker_points
+            marker_bbox = _points_bbox(marker_points)
+            arrowhead_bbox = marker_bbox
+            primitive_bbox = (
+                min(min(xtail, line_end_x) - half_stroke, marker_bbox[0]),
+                min(min(ytail, line_end_y) - half_stroke, marker_bbox[1]),
+                max(max(xtail, line_end_x) + half_stroke, marker_bbox[2]),
+                max(max(ytail, line_end_y) + half_stroke, marker_bbox[3]),
+            )
         else:
             tail_gap = SQUARE_SIZE * 0.36
             shaft_half_width = SQUARE_SIZE * 0.11
@@ -637,7 +1121,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
             head_half_width = SQUARE_SIZE * 0.26
 
             dx, dy = xhead - xtail, yhead - ytail
-            if (abs(head_file - tail_file), abs(head_rank - tail_rank)) in [(1, 2), (2, 1)]:
+            is_knight_move = (abs(head_file - tail_file), abs(head_rank - tail_rank)) in [(1, 2), (2, 1)]
+            arrow_direction = (1.0, 0.0) if is_knight_move else (dx, dy)
+            if is_knight_move:
                 if abs(dx) > abs(dy):
                     ux, uy = math.copysign(1.0, dx), 0.0
                     vx, vy = 0.0, math.copysign(1.0, dy)
@@ -684,11 +1170,34 @@ def board(board: Optional[chess.BaseBoard] = None, *,
                     (shaft_start_x - px * shaft_half_width, shaft_start_y - py * shaft_half_width),
                 ]
 
-            ET.SubElement(svg, "polygon", _attrs({
+            ET.SubElement(arrow_parent, "polygon", _attrs({
                 "points": " ".join(f"{x:g},{y:g}" for x, y in points),
                 "fill": color,
                 "opacity": opacity if opacity < 1.0 else None,
                 "class": "arrow chess-com",
             }))
+            primitive_points = tuple(points)
+            primitive_bbox = _points_bbox(primitive_points)
+            arrowhead_bbox = _points_bbox(points[3:6] if is_knight_move else points[2:5])
 
-    return SvgWrapper(ET.tostring(svg).decode("utf-8"))
+        annotation_color: Optional[CanonicalOverlayColor] = (
+            arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
+        )
+        arrow_obb = _oriented_box(primitive_points, arrow_direction)
+        annotations.append(
+            OverlayAnnotation(
+                kind="arrow",
+                color=annotation_color,
+                bbox_xyxy=primitive_bbox,
+                arrowhead_bbox_xyxy=arrowhead_bbox,
+                tail_xy=(xtail, ytail),
+                head_xy=(xhead, yhead),
+                obb_xyxyxyxy=arrow_obb,
+            )
+        )
+
+    return BoardRenderResult(
+        svg=SvgWrapper(ET.tostring(svg).decode("utf-8")),
+        viewbox_size=full_size,
+        annotations=tuple(annotations),
+    )
