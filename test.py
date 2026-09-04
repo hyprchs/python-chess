@@ -4464,6 +4464,10 @@ class SvgTestCase(unittest.TestCase):
         self.assertLess(arrow.bbox_xyxy[2] - arrow.bbox_xyxy[0], chess.svg.SQUARE_SIZE)
         self.assertGreater(arrow.bbox_xyxy[3] - arrow.bbox_xyxy[1], chess.svg.SQUARE_SIZE)
         self.assertIsNotNone(arrow.arrowhead_bbox_xyxy)
+        self.assertEqual(
+            arrow.arrowhead_bbox_xyxy,
+            (188.4375, 202.8515625, 216.5625, 223.9453125),
+        )
         self.assertLess(
             arrow.arrowhead_bbox_xyxy[3] - arrow.arrowhead_bbox_xyxy[1],
             chess.svg.SQUARE_SIZE,
@@ -4546,12 +4550,12 @@ class SvgTestCase(unittest.TestCase):
         )
 
     def test_svg_chess_com_arrow_style(self):
-        svg = chess.svg.board(
+        rendered = chess.svg.board_with_annotations(
             arrows=[chess.svg.Arrow(chess.E2, chess.E4)],
             arrow_style="chess.com",
             coordinates=False,
         )
-        root = chess.svg.ET.fromstring(svg)
+        root = chess.svg.ET.fromstring(rendered.svg)
         namespace = "{http://www.w3.org/2000/svg}"
         polygon = root.find(f".//{namespace}polygon")
         points = [tuple(map(float, point.split(","))) for point in polygon.get("points").split()]
@@ -4560,20 +4564,28 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(polygon.get("fill"), "#9fcf3f")
         self.assertEqual(len(points), 7)
         self.assertEqual(points[3], (4.5 * chess.svg.SQUARE_SIZE, 4.5 * chess.svg.SQUARE_SIZE))
+        self.assertEqual(
+            rendered.annotations[0].arrowhead_bbox_xyxy,
+            (190.8, 202.5, 214.2, 218.7),
+        )
 
     def test_svg_chess_com_knight_arrow(self):
-        svg = chess.svg.board(
+        rendered = chess.svg.board_with_annotations(
             arrows=[chess.svg.Arrow(chess.B1, chess.C3)],
             arrow_style="chess.com",
             coordinates=False,
         )
-        root = chess.svg.ET.fromstring(svg)
+        root = chess.svg.ET.fromstring(rendered.svg)
         namespace = "{http://www.w3.org/2000/svg}"
         polygon = root.find(f".//{namespace}polygon")
         points = [tuple(map(float, point.split(","))) for point in polygon.get("points").split()]
 
         self.assertEqual(len(points), 9)
         self.assertEqual(points[4], (2.5 * chess.svg.SQUARE_SIZE, 5.5 * chess.svg.SQUARE_SIZE))
+        self.assertEqual(
+            rendered.annotations[0].arrowhead_bbox_xyxy,
+            (96.3, 235.8, 112.5, 259.2),
+        )
 
     def test_svg_arrow_style_color_override(self):
         svg = chess.svg.board(

@@ -405,71 +405,6 @@ def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, f
     )
 
 
-def _arrowhead_bbox(
-    tail: Square,
-    head: Square,
-    *,
-    orientation: Color,
-    board_offset: int,
-    arrow_style: ArrowStyle,
-) -> Tuple[float, float, float, float]:
-    """Bounds of the rendered arrowhead."""
-    xtail, ytail = _square_center(tail, orientation=orientation, board_offset=board_offset)
-    xhead, yhead = _square_center(head, orientation=orientation, board_offset=board_offset)
-    if tail == head:
-        return _box_from_center(xhead, yhead, SQUARE_SIZE / 2)
-
-    dx, dy = xhead - xtail, yhead - ytail
-    if arrow_style == "lichess":
-        length = math.hypot(dx, dy)
-        ux, uy = dx / length, dy / length
-        px, py = -uy, ux
-        stroke_width = SQUARE_SIZE * 10 / 64
-        line_end_x = xhead - ux * stroke_width
-        line_end_y = yhead - uy * stroke_width
-        points = (
-            (line_end_x - ux * 2.05 * stroke_width - px * 2 * stroke_width,
-             line_end_y - uy * 2.05 * stroke_width - py * 2 * stroke_width),
-            (line_end_x - ux * 2.05 * stroke_width + px * 2 * stroke_width,
-             line_end_y - uy * 2.05 * stroke_width + py * 2 * stroke_width),
-            (line_end_x + ux * 0.95 * stroke_width,
-             line_end_y + uy * 0.95 * stroke_width),
-        )
-    else:
-        head_length = SQUARE_SIZE * 0.36
-        head_half_width = SQUARE_SIZE * 0.26
-        if (
-            abs(chess.square_file(head) - chess.square_file(tail)),
-            abs(chess.square_rank(head) - chess.square_rank(tail)),
-        ) in [(1, 2), (2, 1)]:
-            if abs(dx) > abs(dy):
-                ux, uy = math.copysign(1.0, dx), 0.0
-                vx, vy = 0.0, math.copysign(1.0, dy)
-            else:
-                ux, uy = 0.0, math.copysign(1.0, dy)
-                vx, vy = math.copysign(1.0, dx), 0.0
-            points = (
-                (xhead - vx * head_length + ux * head_half_width,
-                 yhead - vy * head_length + uy * head_half_width),
-                (xhead, yhead),
-                (xhead - vx * head_length - ux * head_half_width,
-                 yhead - vy * head_length - uy * head_half_width),
-            )
-        else:
-            length = math.hypot(dx, dy)
-            ux, uy = dx / length, dy / length
-            px, py = -uy, ux
-            points = (
-                (xhead - ux * head_length + px * head_half_width,
-                 yhead - uy * head_length + py * head_half_width),
-                (xhead, yhead),
-                (xhead - ux * head_length - px * head_half_width,
-                 yhead - uy * head_length - py * head_half_width),
-            )
-
-    return _points_bbox(points)
-
-
 def _coord(text: str, x: int, y: int, width: int, height: int, horizontal: bool, margin: int, *, color: str, opacity: float) -> ET.Element:
     scale = margin / MARGIN
 
@@ -1120,6 +1055,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 (xhead - radius, yhead + radius),
             )
             primitive_bbox = _points_bbox(primitive_points)
+            arrowhead_bbox = primitive_bbox
         elif arrow_style == "lichess":
             marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
@@ -1177,6 +1113,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                  line_end_y + uy * half_stroke + py * half_stroke),
             ) + marker_points
             marker_bbox = _points_bbox(marker_points)
+            arrowhead_bbox = marker_bbox
             primitive_bbox = (
                 min(min(xtail, line_end_x) - half_stroke, marker_bbox[0]),
                 min(min(ytail, line_end_y) - half_stroke, marker_bbox[1]),
@@ -1190,7 +1127,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             head_half_width = SQUARE_SIZE * 0.26
 
             dx, dy = xhead - xtail, yhead - ytail
-            if (abs(head_file - tail_file), abs(head_rank - tail_rank)) in [(1, 2), (2, 1)]:
+            is_knight_move = (abs(head_file - tail_file), abs(head_rank - tail_rank)) in [(1, 2), (2, 1)]
+            if is_knight_move:
                 if abs(dx) > abs(dy):
                     ux, uy = math.copysign(1.0, dx), 0.0
                     vx, vy = 0.0, math.copysign(1.0, dy)
@@ -1245,6 +1183,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             }))
             primitive_points = tuple(points)
             primitive_bbox = _points_bbox(primitive_points)
+            arrowhead_bbox = _points_bbox(points[3:6] if is_knight_move else points[2:5])
 
         annotation_color: CanonicalOverlayColor | None = (
             arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
@@ -1255,13 +1194,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 kind="arrow",
                 color=annotation_color,
                 bbox_xyxy=primitive_bbox,
-                arrowhead_bbox_xyxy=_arrowhead_bbox(
-                    tail,
-                    head,
-                    orientation=orientation,
-                    board_offset=board_offset,
-                    arrow_style=arrow_style,
-                ),
+                arrowhead_bbox_xyxy=arrowhead_bbox,
                 tail_xy=(xtail, ytail),
                 head_xy=(xhead, yhead),
                 obb_xyxyxyxy=arrow_obb,
