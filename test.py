@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import copy
+import hashlib
 import logging
 import math
 import os
@@ -13,6 +14,7 @@ import tempfile
 import textwrap
 import typing
 import unittest
+from unittest.mock import patch
 import io
 
 import chess
@@ -4398,6 +4400,13 @@ class SvgTestCase(unittest.TestCase):
     def test_svg_overlay_annotation_type_hints_are_resolvable(self):
         self.assertIn("arrowhead_bbox_xyxy", typing.get_type_hints(chess.svg.OverlayAnnotation))
 
+    def test_svg_overlay_annotation_preserves_positional_obb(self):
+        obb = ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0))
+        annotation = chess.svg.OverlayAnnotation(
+            "arrow", (0.0, 0.0, 10.0, 10.0), None, "green", (0.0, 5.0), (10.0, 5.0), obb
+        )
+        self.assertEqual(annotation.obb_xyxyxyxy, obb)
+
     def test_svg_board(self):
         svg = chess.BaseBoard("4k3/8/8/8/8/8/8/4KB2")._repr_svg_()
         self.assertIn("white bishop", svg)
@@ -4408,6 +4417,7 @@ class SvgTestCase(unittest.TestCase):
         self.assertIn("<circle", rendered.svg)
         self.assertNotIn("<line", rendered.svg)
         self.assertIsNone(rendered.annotations[0].arrowhead_bbox_xyxy)
+        self.assertEqual(rendered.annotations[0].head_xy, rendered.annotations[0].tail_xy)
 
         svg = chess.svg.board(arrows=[chess.svg.Arrow(chess.A1, chess.H8)])
         self.assertNotIn("<circle", svg)
@@ -4464,8 +4474,8 @@ class SvgTestCase(unittest.TestCase):
         self.assertTrue(all(line.get("opacity") is None for line in lines))
 
         arrow = rendered.annotations[0]
-        self.assertEqual(arrow.tail_xy, (4.5 * chess.svg.SQUARE_SIZE, 6.5 * chess.svg.SQUARE_SIZE))
-        self.assertEqual(arrow.head_xy, (4.5 * chess.svg.SQUARE_SIZE, 4.5 * chess.svg.SQUARE_SIZE))
+        self.assertEqual(arrow.tail_xy, (202.5, 296.015625))
+        self.assertEqual(arrow.head_xy, (202.5, 202.8515625))
         self.assertLess(arrow.bbox_xyxy[2] - arrow.bbox_xyxy[0], chess.svg.SQUARE_SIZE)
         self.assertGreater(arrow.bbox_xyxy[3] - arrow.bbox_xyxy[1], chess.svg.SQUARE_SIZE)
         self.assertIsNotNone(arrow.arrowhead_bbox_xyxy)
@@ -4551,12 +4561,12 @@ class SvgTestCase(unittest.TestCase):
 
         first, second = rendered.annotations
         self.assertEqual(
-            (first.tail_xy, first.head_xy),
-            ((202.5, 202.5), (157.5, 157.5)),
+            tuple(tuple(round(value, 6) for value in point) for point in (first.tail_xy, first.head_xy)),
+            ((204.985922, 204.985922), (157.748592, 157.748592)),
         )
         self.assertEqual(
-            (second.tail_xy, second.head_xy),
-            ((157.5, 202.5), (202.5, 157.5)),
+            tuple(tuple(round(value, 6) for value in point) for point in (second.tail_xy, second.head_xy)),
+            ((155.014078, 204.985922), (202.251408, 157.748592)),
         )
         self.assertEqual(
             tuple(round(value, 6) for value in first.bbox_xyxy),
@@ -4622,6 +4632,90 @@ class SvgTestCase(unittest.TestCase):
             rendered.annotations[0].arrowhead_bbox_xyxy,
             (96.3, 235.8, 112.5, 259.2),
         )
+
+    def test_svg_arrow_landmarks_follow_painted_primitives(self):
+        namespace = "{http://www.w3.org/2000/svg}"
+        # All destinations include arbitrary slopes and all eight knight bends.
+        for style in ("lichess", "chess.com"):
+            for orientation in (chess.WHITE, chess.BLACK):
+                for coordinates, borders in ((False, False), (True, False), (False, True), (True, True)):
+                    for destination in chess.SQUARES:
+                        if destination == chess.D4:
+                            continue
+                        with self.subTest(style=style, orientation=orientation, coordinates=coordinates, borders=borders, destination=destination):
+                            result = chess.svg.board_with_annotations(
+                                arrows=[chess.svg.Arrow(chess.D4, destination)],
+                                arrow_style=style, orientation=orientation,
+                                coordinates=coordinates, borders=borders,
+                            )
+                            annotation, = result.annotations
+                            root = chess.svg.ET.fromstring(result.svg)
+                            offset = (result.viewbox_size - 8 * chess.svg.SQUARE_SIZE) / 2
+                            source = (
+                                offset + (3.5 if orientation else 4.5) * chess.svg.SQUARE_SIZE,
+                                offset + (4.5 if orientation else 3.5) * chess.svg.SQUARE_SIZE,
+                            )
+                            target = (
+                                offset + (chess.square_file(destination) + 0.5 if orientation else 7.5 - chess.square_file(destination)) * chess.svg.SQUARE_SIZE,
+                                offset + (7.5 - chess.square_rank(destination) if orientation else chess.square_rank(destination) + 0.5) * chess.svg.SQUARE_SIZE,
+                            )
+                            dx, dy = target[0] - source[0], target[1] - source[1]
+                            length = math.hypot(dx, dy)
+                            ux, uy = dx / length, dy / length
+                            if style == "lichess":
+                                line = root.find(f".//{namespace}line")
+                                marker = root.find(f".//{namespace}marker")
+                                width = float(line.get("stroke-width"))
+                                self.assertEqual(line.get("stroke-linecap"), "round")
+                                expected_tail = (source[0] - ux * width / 2, source[1] - uy * width / 2)
+                                expected_head = (
+                                    float(line.get("x2")) + ux * (3 - float(marker.get("refX"))) * width,
+                                    float(line.get("y2")) + uy * (3 - float(marker.get("refX"))) * width,
+                                )
+                            else:
+                                polygon = root.find(f".//{namespace}polygon")
+                                points = [tuple(map(float, point.split(","))) for point in polygon.get("points").split()]
+                                expected_tail = tuple((first + last) / 2 for first, last in zip(points[0], points[-1]))
+                                expected_head = points[4] if len(points) == 9 else points[3]
+                                # An L-shaped arrow starts along its two-square leg.
+                                if len(points) == 9:
+                                    ux, uy = (math.copysign(1, dx), 0) if abs(dx) > abs(dy) else (0, math.copysign(1, dy))
+                                for actual, expected in zip(expected_tail, (source[0] + ux * 16.2, source[1] + uy * 16.2)):
+                                    self.assertAlmostEqual(actual, expected, places=3)
+                                self.assertEqual(expected_head, target)
+                            for actual_point, expected_point in ((annotation.tail_xy, expected_tail), (annotation.head_xy, expected_head)):
+                                for actual, expected in zip(actual_point, expected_point):
+                                    # Polygon coordinates serialize to six significant digits.
+                                    self.assertAlmostEqual(actual, expected, places=3)
+                                x, y = actual_point
+                                left, top, right, bottom = annotation.bbox_xyxy
+                                self.assertTrue(left - 1e-9 <= x <= right + 1e-9)
+                                self.assertTrue(top - 1e-9 <= y <= bottom + 1e-9)
+
+    def test_svg_painted_landmarks_do_not_change_image_bytes(self):
+        # Captured before changing endpoint annotations; freeze only the SVG ID namespace.
+        hashes = {
+            "lichess": ("2ae23d098c859e446e68a1df4dd4e04ae2b76b85530a403a464de93829192b13", "59d50324a496a8fdf86eef7c7cece54ec312e87759c899ce692e43e38033f179"),
+            "chess.com": ("c17a170835da923525637b28dfe0b950f48d95c12a337771460dbb094cb5a290", "76e4f876a5dc78e74471585c7aaed5caea148b9860076fa40a4bc0373e61ced9"),
+        }
+        for style, (svg_hash, png_hash) in hashes.items():
+            with self.subTest(style=style), patch("chess.svg.uuid.uuid4") as uuid4:
+                uuid4.return_value.hex = "frozen"
+                result = chess.svg.board_with_annotations(
+                    chess.Board(), coordinates=True, arrow_style=style,
+                    arrows=[
+                        chess.svg.Arrow(chess.A1, chess.H8),
+                        chess.svg.Arrow(chess.E2, chess.E4, color="red"),
+                        chess.svg.Arrow(chess.B1, chess.C3, color="blue"),
+                        chess.svg.Arrow(chess.D4, chess.D4, color="yellow"),
+                    ],
+                )
+                self.assertEqual(hashlib.sha256(result.svg.encode()).hexdigest(), svg_hash)
+                try:
+                    import resvg_py
+                except ImportError:
+                    continue  # Raster verification is also run by web-boardimage's pinned environment.
+                self.assertEqual(hashlib.sha256(resvg_py.svg_to_bytes(svg_string=result.svg)).hexdigest(), png_hash)
 
     def test_svg_arrow_style_color_override(self):
         svg = chess.svg.board(
@@ -4836,6 +4930,54 @@ class SvgTestCase(unittest.TestCase):
         board_svg = chess.svg.board(board, piece_set="cburnett")
         self.assertIn('id="piece-wP"', board_svg)
         self.assertIn('href="#piece-wP"', board_svg)
+
+    def test_svg_drag_ghost_uses_complete_piece_above_overlays(self):
+        board = chess.Board("8/8/8/8/3N4/8/8/4K3 w - - 0 1")
+        original_fen = board.fen()
+        ns = "{http://www.w3.org/2000/svg}"
+        for piece_set in (None, "cburnett", "dubrovny"):
+            for orientation in chess.COLORS:
+                for coordinates in (False, True):
+                    with self.subTest(piece_set=piece_set, orientation=orientation,
+                                      coordinates=coordinates):
+                        options = dict(piece_set=piece_set, orientation=orientation,
+                                       coordinates=coordinates, arrows=[(chess.A4, chess.H4)])
+                        ordinary = chess.svg.board_with_annotations(board, **options)
+                        rendered = chess.svg.board_with_annotations(
+                            board, ghost_squares=[chess.D4, chess.D4], **options)
+                        root = chess.svg.ET.fromstring(rendered.svg)
+                        ghost = root[-1]
+                        self.assertEqual(ghost.tag, ns + "g")
+                        self.assertEqual(ghost.attrib, {"class": "ghosts", "opacity": "0.3"})
+                        self.assertEqual(len(ghost), 1)
+                        use = ghost[0]
+                        self.assertEqual(use.get("href"), "#piece-wN" if piece_set else "#white-knight")
+                        margin = 15 if coordinates else 0
+                        x, y = (135, 180) if orientation else (180, 135)
+                        self.assertEqual(use.get("transform"), f"translate({x + margin}, {y + margin})")
+                        self.assertIsNone(use.get("opacity"))
+                        solid = root.findall(ns + "use")
+                        self.assertEqual(len(solid), 1)
+                        self.assertEqual(solid[0].get("href"), "#piece-wK" if piece_set else "#white-king")
+                        self.assertIsNone(solid[0].get("opacity"))
+                        self.assertEqual(rendered.annotations, ordinary.annotations)
+                        # Both public entry points share the exact ghost rendering.
+                        with patch("chess.svg.uuid.uuid4") as uuid4:
+                            uuid4.return_value.hex = "ghost-fixture"
+                            self.assertEqual(
+                                chess.svg.board(board, ghost_squares=[chess.D4], **options),
+                                chess.svg.board_with_annotations(
+                                    board, ghost_squares=[chess.D4], **options).svg)
+        self.assertEqual(board.fen(), original_fen)
+
+    def test_svg_drag_ghost_rejects_unoccupied_or_invalid_squares(self):
+        for board, squares in ((None, [chess.D4]), (chess.Board(), [chess.D4]),
+                               (chess.Board(), [-1]), (chess.Board(), [64]),
+                               (chess.Board(), ["e2"]), (chess.Board(), [True])):
+            for renderer in (chess.svg.board, chess.svg.board_with_annotations):
+                with self.subTest(board=board, squares=squares, renderer=renderer):
+                    with self.assertRaisesRegex(ValueError, "occupied board squares"):
+                        renderer(board, ghost_squares=squares)
 
 
 class SuicideTestCase(unittest.TestCase):
