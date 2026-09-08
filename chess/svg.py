@@ -43,6 +43,11 @@ class OverlayAnnotation:
 
     Straight-arrow OBBs align with the tail-to-head axis. Chess.com knight
     arrows and same-square circles use board-aligned bounds.
+
+    For directed arrows, ``head_xy`` is the painted triangular tip and
+    ``tail_xy`` is the rear end of the painted shaft along its centerline,
+    not the logical source/destination square centers. Same-square circles
+    retain their center points.
     """
 
     kind: Literal[
@@ -523,7 +528,8 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           piece_set: Optional[str] = None,
           legal_moves: Iterable[chess.Move] = (),
           legal_move_style: LegalMoveStyle = "lichess",
-          user_highlights: Iterable[UserHighlight] = ()) -> "SvgWrapper":
+          user_highlights: Iterable[UserHighlight] = (),
+          ghost_squares: Iterable[Square] = ()) -> "SvgWrapper":
     """
     Renders a board with pieces and/or selected squares as an SVG image.
     Use :func:`board_with_annotations` when semantic overlay bounds are needed.
@@ -566,6 +572,9 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         ``"lichess"`` (the default) or ``"chess.com"``.
     :param user_highlights: Foreground square-circle annotations with canonical
         colors and a Lichess or Chess.com palette.
+    :param ghost_squares: Occupied squares whose pieces are shown as Lichess
+        drag ghosts, at 0.3 opacity above board overlays. This changes only
+        their appearance, not the board or overlay annotations.
 
     >>> import chess
     >>> import chess.svg
@@ -601,6 +610,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         legal_moves=legal_moves,
         legal_move_style=legal_move_style,
         user_highlights=user_highlights,
+        ghost_squares=ghost_squares,
     ).svg
 
 
@@ -619,7 +629,8 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            piece_set: Optional[str] = None,
                            legal_moves: Iterable[chess.Move] = (),
                            legal_move_style: LegalMoveStyle = "lichess",
-                           user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
+                           user_highlights: Iterable[UserHighlight] = (),
+                           ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
     """Renders a board SVG with renderer-owned semantic overlay geometry.
 
     Parameters match :func:`board`, except arbitrary CSS ``style`` is
@@ -642,6 +653,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         legal_moves=legal_moves,
         legal_move_style=legal_move_style,
         user_highlights=user_highlights,
+        ghost_squares=ghost_squares,
     )
 
 
@@ -661,12 +673,20 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   piece_set: Optional[str] = None,
                   legal_moves: Iterable[chess.Move] = (),
                   legal_move_style: LegalMoveStyle = "lichess",
-                  user_highlights: Iterable[UserHighlight] = ()) -> BoardRenderResult:
+                  user_highlights: Iterable[UserHighlight] = (),
+                  ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
     """Builds the shared SVG and annotation result for the public renderers."""
     if arrow_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported arrow style: {arrow_style!r}")
     if legal_move_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported legal move style: {legal_move_style!r}")
+    ghost_squares = frozenset(ghost_squares)
+    if any(
+        type(square) is not int or square not in chess.SQUARES
+        or board is None or board.piece_at(square) is None
+        for square in ghost_squares
+    ):
+        raise ValueError("ghost_squares must contain occupied board squares")
     legal_destinations = _normalize_legal_moves(
         board, legal_moves, legal_move_style=legal_move_style
     )
@@ -915,6 +935,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             bbox = _box_from_center(cx, cy, radius + stroke_width / 2)
         annotations.append(OverlayAnnotation(kind=kind, bbox_xyxy=bbox))
 
+    # Composite each complete ghost piece once, rather than fading its individual SVG paths.
+    ghosts = ET.Element("g", {"class": "ghosts", "opacity": "0.3"})
     # Render pieces and selected squares.
     for square, bb in enumerate(chess.BB_SQUARES):
         file_index = chess.square_file(square)
@@ -930,7 +952,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                     href = f"#{chess.COLOR_NAMES[piece.color]}-{chess.PIECE_NAMES[piece.piece_type]}"
                 else:
                     href = f"#piece-{_piece_code(piece, piece_set=piece_set)}"
-                ET.SubElement(svg, "use", {
+                ET.SubElement(ghosts if square in ghost_squares else svg, "use", {
                     "href": href,
                     "xlink:href": href,
                     "transform": f"translate({x:d}, {y:d})",
@@ -1049,6 +1071,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             )
             primitive_bbox = _points_bbox(primitive_points)
             arrowhead_bbox = None
+            painted_tail = (xtail, ytail)
+            painted_head = (xhead, yhead)
         elif arrow_style == "lichess":
             marker_id = f"arrowhead-{marker_namespace}-{arrow_index}"
             marker = ET.SubElement(defs, "marker", {
@@ -1096,6 +1120,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 (line_end_x + ux * 0.95 * margin,
                  line_end_y + uy * 0.95 * margin),
             )
+            painted_tail = (xtail - ux * half_stroke, ytail - uy * half_stroke)
+            painted_head = marker_points[2]
             primitive_points = (
                 (xtail - ux * half_stroke - px * half_stroke,
                  ytail - uy * half_stroke - py * half_stroke),
@@ -1179,6 +1205,11 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             primitive_points = tuple(points)
             primitive_bbox = _points_bbox(primitive_points)
             arrowhead_bbox = _points_bbox(points[3:6] if is_knight_move else points[2:5])
+            painted_tail = (
+                (points[0][0] + points[-1][0]) / 2,
+                (points[0][1] + points[-1][1]) / 2,
+            )
+            painted_head = points[4] if is_knight_move else points[3]
 
         annotation_color: Optional[CanonicalOverlayColor] = (
             arrow_color if arrow_color in {"green", "red", "yellow", "blue"} else None
@@ -1190,11 +1221,14 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 color=annotation_color,
                 bbox_xyxy=primitive_bbox,
                 arrowhead_bbox_xyxy=arrowhead_bbox,
-                tail_xy=(xtail, ytail),
-                head_xy=(xhead, yhead),
+                tail_xy=painted_tail,
+                head_xy=painted_head,
                 obb_xyxyxyxy=arrow_obb,
             )
         )
+
+    if len(ghosts):
+        svg.append(ghosts)
 
     return BoardRenderResult(
         svg=SvgWrapper(ET.tostring(svg).decode("utf-8")),
