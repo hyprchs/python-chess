@@ -4747,6 +4747,59 @@ class SvgTestCase(unittest.TestCase):
         with self.assertRaises(TypeError):
             chess.svg.board_with_annotations(style=style)  # type: ignore
 
+    def test_svg_explicit_destination_markers_match_legal_moves(self):
+        board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
+        markers = [
+            chess.svg.DestinationMarker(chess.D6, "dot"),
+            chess.svg.DestinationMarker(chess.F6, "capture"),
+        ]
+        for style in ("lichess", "chess.com"):
+            for orientation in (chess.WHITE, chess.BLACK):
+                for coordinates in (False, True):
+                    with self.subTest(style=style, orientation=orientation, coordinates=coordinates):
+                        options = dict(legal_move_style=style, orientation=orientation, coordinates=coordinates)
+                        # Capture gradients have arbitrary IDs; fix only that source of variation.
+                        with patch.object(chess.svg.uuid, "uuid4") as identifier:
+                            identifier.return_value.hex = "fixed"
+                            derived = chess.svg.board_with_annotations(
+                                board, legal_moves=[chess.Move.from_uci("e4d6"), chess.Move.from_uci("e4f6")], **options,
+                            )
+                            explicit = chess.svg.board_with_annotations(board, destination_markers=iter(markers), **options)
+                            self.assertEqual(explicit.svg, derived.svg)
+                            self.assertEqual(explicit.annotations, derived.annotations)
+                            self.assertEqual(chess.svg.board(board, destination_markers=markers, **options), derived.svg)
+
+    def test_svg_explicit_destination_markers_do_not_infer_occupancy(self):
+        markers = [
+            chess.svg.DestinationMarker(chess.A1, "capture"),
+            chess.svg.DestinationMarker(chess.H8, "dot"),
+        ]
+        for board in (None, chess.BaseBoard("7k/8/8/8/8/8/8/8")):
+            rendered = chess.svg.board_with_annotations(board, destination_markers=markers)
+            self.assertEqual([value.kind for value in rendered.annotations], [
+                "legal_destination_capture", "legal_destination_dot",
+            ])
+            self.assertTrue(all(value.arrowhead_bbox_xyxy is None for value in rendered.annotations))
+
+    def test_svg_rejects_invalid_explicit_destination_markers(self):
+        for square in (-1, 64, True, 1.5, "e4"):
+            with self.subTest(square=square), self.assertRaises(ValueError):
+                chess.svg.DestinationMarker(square, "dot")
+        for kind in ("ring", "", None):
+            with self.subTest(kind=kind), self.assertRaises(ValueError):
+                chess.svg.DestinationMarker(chess.E4, kind)
+        dot = chess.svg.DestinationMarker(chess.E4, "dot")
+        for renderer in (chess.svg.board, chess.svg.board_with_annotations):
+            with self.assertRaises(TypeError):
+                renderer(destination_markers=[(chess.E4, "dot")])
+            for second in (dot, chess.svg.DestinationMarker(chess.E4, "capture")):
+                with self.assertRaisesRegex(ValueError, "distinct squares"):
+                    renderer(destination_markers=[dot, second])
+            with self.assertRaisesRegex(ValueError, "cannot be combined"):
+                renderer(chess.Board(), destination_markers=[dot], legal_moves=[chess.Move.from_uci("e2e4")])
+            with self.assertRaises(ValueError):
+                renderer(destination_markers=[dot], legal_move_style="invalid")
+
     def test_svg_legal_destinations_and_annotations(self):
         board = chess.Board("4k3/8/5p2/8/4N3/8/8/4K3 w - - 0 1")
         rendered = chess.svg.board_with_annotations(

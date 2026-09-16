@@ -23,6 +23,20 @@ CanonicalOverlayColor = Literal["green", "red", "yellow", "blue"]
 
 
 @dataclass(frozen=True)
+class DestinationMarker:
+    """An explicitly placed destination dot or capture ring, independent of move legality."""
+
+    square: Square
+    kind: Literal["dot", "capture"]
+
+    def __post_init__(self) -> None:
+        if type(self.square) is not int or self.square not in chess.SQUARES:
+            raise ValueError("destination marker square must be a chess square")
+        if self.kind not in ("dot", "capture"):
+            raise ValueError(f"unsupported destination marker kind: {self.kind!r}")
+
+
+@dataclass(frozen=True)
 class UserHighlight:
     """A Lichess-style circular user highlight with a site color palette."""
 
@@ -329,7 +343,7 @@ def _normalize_legal_moves(
     legal_moves: Iterable[chess.Move],
     *,
     legal_move_style: LegalMoveStyle,
-) -> Tuple[Tuple[chess.Move, Literal["legal_destination_dot", "legal_destination_capture"]], ...]:
+) -> Tuple[DestinationMarker, ...]:
     requested = tuple(legal_moves)
     if not requested:
         return ()
@@ -339,7 +353,7 @@ def _normalize_legal_moves(
     if len(source_squares) != 1:
         raise ValueError("legal_moves must share one source square")
     seen_destinations: set[Square] = set()
-    normalized: list[Tuple[chess.Move, Literal["legal_destination_dot", "legal_destination_capture"]]] = []
+    normalized: list[DestinationMarker] = []
     for move in requested:
         if move not in board.legal_moves:
             raise ValueError(f"legal_moves contains an illegal move: {move.uci()}")
@@ -361,11 +375,9 @@ def _normalize_legal_moves(
                 continue
             seen_destinations.add(destination.to_square)
             normalized.append(
-                (
-                    destination,
-                    "legal_destination_dot"
-                    if board.piece_at(destination.to_square) is None
-                    else "legal_destination_capture",
+                DestinationMarker(
+                    destination.to_square,
+                    "dot" if board.piece_at(destination.to_square) is None else "capture",
                 )
             )
     return tuple(normalized)
@@ -527,6 +539,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           style: Optional[str] = None,
           piece_set: Optional[str] = None,
           legal_moves: Iterable[chess.Move] = (),
+          destination_markers: Iterable[DestinationMarker] = (),
           legal_move_style: LegalMoveStyle = "lichess",
           user_highlights: Iterable[UserHighlight] = (),
           ghost_squares: Iterable[Square] = ()) -> "SvgWrapper":
@@ -569,7 +582,11 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         deduplicated. Lichess-style castling shows both the king destination
         and the rook square.
     :param legal_move_style: The legal-destination geometry, either
-        ``"lichess"`` (the default) or ``"chess.com"``.
+        ``"lichess"`` (the default) or ``"chess.com"``, for both *legal_moves*
+        and *destination_markers*.
+    :param destination_markers: Explicit :class:`DestinationMarker` values, without
+        requiring a legal position, source square, or matching square occupancy.
+        Squares must be distinct. Cannot be combined with nonempty *legal_moves*.
     :param user_highlights: Foreground square-circle annotations with canonical
         colors and a Lichess or Chess.com palette.
     :param ghost_squares: Occupied squares whose pieces are shown as Lichess
@@ -608,6 +625,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         style=style,
         piece_set=piece_set,
         legal_moves=legal_moves,
+        destination_markers=destination_markers,
         legal_move_style=legal_move_style,
         user_highlights=user_highlights,
         ghost_squares=ghost_squares,
@@ -628,6 +646,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            borders: bool = False,
                            piece_set: Optional[str] = None,
                            legal_moves: Iterable[chess.Move] = (),
+                           destination_markers: Iterable[DestinationMarker] = (),
                            legal_move_style: LegalMoveStyle = "lichess",
                            user_highlights: Iterable[UserHighlight] = (),
                            ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
@@ -651,6 +670,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         borders=borders,
         piece_set=piece_set,
         legal_moves=legal_moves,
+        destination_markers=destination_markers,
         legal_move_style=legal_move_style,
         user_highlights=user_highlights,
         ghost_squares=ghost_squares,
@@ -672,6 +692,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   style: Optional[str] = None,
                   piece_set: Optional[str] = None,
                   legal_moves: Iterable[chess.Move] = (),
+                  destination_markers: Iterable[DestinationMarker] = (),
                   legal_move_style: LegalMoveStyle = "lichess",
                   user_highlights: Iterable[UserHighlight] = (),
                   ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
@@ -687,9 +708,16 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         for square in ghost_squares
     ):
         raise ValueError("ghost_squares must contain occupied board squares")
-    legal_destinations = _normalize_legal_moves(
-        board, legal_moves, legal_move_style=legal_move_style
-    )
+    legal_moves = tuple(legal_moves)
+    markers = tuple(destination_markers)
+    if markers and legal_moves:
+        raise ValueError("destination_markers and legal_moves cannot be combined")
+    if any(not isinstance(marker, DestinationMarker) for marker in markers):
+        raise TypeError("destination_markers must contain DestinationMarker values")
+    if len({marker.square for marker in markers}) != len(markers):
+        raise ValueError("destination_markers must have distinct squares")
+    if not markers:
+        markers = _normalize_legal_moves(board, legal_moves, legal_move_style=legal_move_style)
     arrows = tuple(arrows)
     highlights = tuple(user_highlights)
     if any(not isinstance(highlight, UserHighlight) for highlight in highlights):
@@ -854,12 +882,12 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
     # Legal destinations are board-local UI hints. Both source sites render
     # them underneath the piece layer, so capture rings remain visible around
     # the target piece rather than obscuring it.
-    for move, kind in legal_destinations:
+    for destination_marker in markers:
         cx, cy = _square_center(
-            move.to_square, orientation=orientation, board_offset=board_offset
+            destination_marker.square, orientation=orientation, board_offset=board_offset
         )
         if legal_move_style == "lichess":
-            if kind == "legal_destination_dot":
+            if destination_marker.kind == "dot":
                 radius = SQUARE_SIZE * 0.19
                 ET.SubElement(svg, "circle", _attrs({
                     "cx": cx,
@@ -872,7 +900,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 bbox = _box_from_center(cx, cy, radius)
             else:
                 x, y = _square_origin(
-                    move.to_square, orientation=orientation, board_offset=board_offset
+                    destination_marker.square, orientation=orientation, board_offset=board_offset
                 )
                 gradient_id = f"legal-capture-{uuid.uuid4().hex}"
                 # CSS radial-gradient() defaults to farthest-corner. Match
@@ -906,7 +934,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                     "class": "legal-destination lichess capture",
                 }))
                 bbox = (x, y, x + SQUARE_SIZE, y + SQUARE_SIZE)
-        elif kind == "legal_destination_dot":
+        elif destination_marker.kind == "dot":
             # Chess.com's .hint uses 4.2% board-width padding. At eight files
             # this leaves a radius of (1 - 2 * .336) / 2 = .164 squares.
             radius = SQUARE_SIZE * 0.164
@@ -933,7 +961,10 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 "class": "legal-destination chess-com capture",
             }))
             bbox = _box_from_center(cx, cy, radius + stroke_width / 2)
-        annotations.append(OverlayAnnotation(kind=kind, bbox_xyxy=bbox))
+        annotations.append(OverlayAnnotation(
+            kind="legal_destination_dot" if destination_marker.kind == "dot" else "legal_destination_capture",
+            bbox_xyxy=bbox,
+        ))
 
     # Composite each complete ghost piece once, rather than fading its individual SVG paths.
     ghosts = ET.Element("g", {"class": "ghosts", "opacity": "0.3"})
