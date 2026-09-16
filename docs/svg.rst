@@ -28,6 +28,33 @@ rear edge, including the first leg of an L-shaped knight arrow.
 Same-square circles retain their center points, with no arrowhead box.
 Annotation changes do not change the SVG appearance.
 
+Explicit destination markers
+----------------------------
+
+Both board renderers accept ``destination_markers`` when the visible hints are
+known independently of legal moves::
+
+    chess.svg.board_with_annotations(
+        destination_markers=[
+            chess.svg.DestinationMarker(chess.E4, "dot"),
+            chess.svg.DestinationMarker(chess.F6, "capture"),
+        ],
+        legal_move_style="lichess",  # or "chess.com"
+    )
+
+No board, source square, side to move, or occupancy check is required. The caller
+chooses each marker's kind. Squares must be distinct, and nonempty
+``destination_markers`` and ``legal_moves`` cannot be combined. Existing legal-move
+validation, promotion deduplication, and castling behavior remain unchanged.
+
+Both inputs use the same SVG primitives and ``OverlayAnnotation`` output:
+``legal_destination_dot`` / ``legal_destination_capture`` with ``bbox_xyxy`` in
+SVG viewBox coordinates. Markers remain behind pieces and follow orientation and
+coordinate margins. This adds no annotation-editor state to the renderer.
+
+.. autoclass:: chess.svg.DestinationMarker
+    :members:
+
 Drag ghosts
 -----------
 
