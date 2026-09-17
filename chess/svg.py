@@ -563,6 +563,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           squares: Optional[IntoSquareSet] = None,
           size: Optional[int] = None,
           css_size: Optional[float] = None,
+          device_pixel_ratio: float = 1.0,
           coordinates: bool = True,
           coordinate_style: CoordinateStyle = "lichess",
           colors: Dict[str, str] = {},
@@ -598,6 +599,8 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         with an X.
     :param size: The size of the image in pixels (e.g., ``400`` for a 400 by
         400 board), or ``None`` (the default) for no size limit.
+    :param device_pixel_ratio: CSS device-pixel scale (default 1), used to snap
+        Chess.com capture borders like Chromium. Does not change output size.
     :param css_size: Logical board size in CSS pixels for size-dependent capture
         rings. Defaults to *size*, or the SVG viewBox size when *size* is absent.
         Set separately when resizing a screenshot preview; this does not change
@@ -658,6 +661,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         squares=squares,
         size=size,
         css_size=css_size,
+        device_pixel_ratio=device_pixel_ratio,
         coordinates=coordinates,
         coordinate_style=coordinate_style,
         colors=colors,
@@ -682,6 +686,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            squares: Optional[IntoSquareSet] = None,
                            size: Optional[int] = None,
                            css_size: Optional[float] = None,
+                           device_pixel_ratio: float = 1.0,
                            coordinates: bool = True,
                            coordinate_style: CoordinateStyle = "lichess",
                            colors: Dict[str, str] = {},
@@ -708,6 +713,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         squares=squares,
         size=size,
         css_size=css_size,
+        device_pixel_ratio=device_pixel_ratio,
         coordinates=coordinates,
         coordinate_style=coordinate_style,
         colors=colors,
@@ -731,6 +737,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   squares: Optional[IntoSquareSet] = None,
                   size: Optional[int] = None,
                   css_size: Optional[float] = None,
+                  device_pixel_ratio: float = 1.0,
                   coordinates: bool = True,
                   coordinate_style: CoordinateStyle = "lichess",
                   colors: Dict[str, str] = {},
@@ -743,6 +750,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   user_highlights: Iterable[UserHighlight] = (),
                   ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
     """Builds the shared SVG and annotation result for the public renderers."""
+    if not math.isfinite(device_pixel_ratio) or not 0 < device_pixel_ratio <= 16:
+        raise ValueError("device_pixel_ratio must be finite and in (0, 16]")
     if css_size is not None and (not math.isfinite(css_size) or css_size <= 0):
         raise ValueError("css_size must be finite and positive")
     if coordinate_style not in ["lichess", "chess.com"]:
@@ -963,10 +972,13 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         else:
             # Chess.com starts with a 5px CSS border, then sets borderWidth to
             # clientWidth * .1. clientWidth excludes both borders and rounds to
-            # an integer. Preserve the resulting CSS width until rasterization.
+            # an integer; Chromium then snaps a positive border down to device
+            # pixels, with a one-device-pixel minimum.
             css_scale = (css_size if css_size is not None else size or full_size) / full_size
-            inner_width = max(0, math.floor(SQUARE_SIZE * css_scale - 10 + 0.5))
-            stroke_width = inner_width / 10 / css_scale
+            initial_border = math.floor(5 * device_pixel_ratio) / device_pixel_ratio
+            inner_width = max(0, math.floor(SQUARE_SIZE * css_scale - 2 * initial_border + 0.5))
+            device_width = max(1, math.floor(inner_width * device_pixel_ratio / 10)) if inner_width else 0
+            stroke_width = device_width / device_pixel_ratio / css_scale
             radius = SQUARE_SIZE / 2 - stroke_width / 2
             ET.SubElement(svg, "circle", _attrs({
                 "cx": cx,

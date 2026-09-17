@@ -4974,7 +4974,7 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(float(captures[0].get("cx")), 5.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(captures[0].get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(dots[0].get("r")), chess.svg.SQUARE_SIZE * 0.164)
-        self.assertEqual(float(captures[0].get("stroke-width")), 3.5)
+        self.assertEqual(float(captures[0].get("stroke-width")), 3.0)
         self.assertEqual(captures[0].get("opacity"), "0.14")
 
     def test_svg_chess_com_capture_uses_live_css_sizing(self):
@@ -4982,9 +4982,9 @@ class SvgTestCase(unittest.TestCase):
         for css_size, expected_width in ((160, 1), (256, 2.2), (360, 3.5), (400, 4),
                                          (512, 5.4), (600, 6.5), (616, 6.7),
                                          (620, 6.8), (640, 7), (800, 9), (1024, 11.8)):
-            for raster_size in (css_size, 640):
+            for raster_size, ratio in ((css_size, 1), (640, 1), (640, 2)):
                 rendered = chess.svg.board_with_annotations(
-                    size=raster_size, css_size=css_size, coordinates=False,
+                    size=raster_size, css_size=css_size, device_pixel_ratio=ratio, coordinates=False,
                     destination_markers=[chess.svg.DestinationMarker(chess.E4, "capture")],
                     legal_move_style="chess.com",
                 )
@@ -4992,10 +4992,13 @@ class SvgTestCase(unittest.TestCase):
                     ".//{http://www.w3.org/2000/svg}circle"
                 )
                 self.assertAlmostEqual(float(circle.get("stroke-width")) * css_size / 360,
-                                       expected_width)
+                                       max(1, math.floor(expected_width * ratio)) / ratio)
                 self.assertAlmostEqual(float(circle.get("r")) + float(circle.get("stroke-width")) / 2,
                                        chess.svg.SQUARE_SIZE / 2)
                 self.assertEqual(rendered.annotations[0].bbox_xyxy, (180, 180, 225, 225))
+        for ratio in (0, -1, 17, float("inf"), float("nan")):
+            with self.assertRaisesRegex(ValueError, "device_pixel_ratio"):
+                chess.svg.board(device_pixel_ratio=ratio)
         for css_size in (0, -1, float("inf"), float("nan")):
             with self.assertRaisesRegex(ValueError, "css_size"):
                 chess.svg.board(css_size=css_size)
