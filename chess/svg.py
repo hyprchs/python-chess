@@ -1019,8 +1019,9 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         color, opacity = _color(palette[color_key])
         parent = svg if highlight.palette == "chess.com" else lichess_shapes
         assert parent is not None
-        radius = SQUARE_SIZE * 0.45
-        stroke_width = SQUARE_SIZE * 0.10
+        # Chessground circleWidth(): a settled circle is 4/64 of a square.
+        stroke_width = SQUARE_SIZE * 4 / 64
+        radius = SQUARE_SIZE / 2 - stroke_width / 2
         ET.SubElement(parent, "circle", _attrs({
             "cx": cx,
             "cy": cy,
@@ -1086,11 +1087,12 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         if (head_file, head_rank) == (tail_file, tail_rank):
             arrow_direction = (1.0, 0.0)
             radius = SQUARE_SIZE * 0.5
+            stroke_width = SQUARE_SIZE * (4 / 64 if arrow_style == "lichess" else 0.1)
             ET.SubElement(arrow_parent, "circle", _attrs({
                 "cx": xhead,
                 "cy": yhead,
-                "r": SQUARE_SIZE * 0.9 / 2,
-                "stroke-width": SQUARE_SIZE * 0.1,
+                "r": radius - stroke_width / 2,
+                "stroke-width": stroke_width,
                 "stroke": color,
                 "opacity": opacity if opacity < 1.0 else None,
                 "fill": "none",
