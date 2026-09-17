@@ -15,8 +15,8 @@ from chess import Color, IntoSquareSet, Square
 
 
 SQUARE_SIZE = 45
-MARGIN = 20
 
+CoordinateStyle = Literal["lichess", "chess.com"]
 ArrowStyle = Literal["lichess", "chess.com"]
 LegalMoveStyle = Literal["lichess", "chess.com"]
 CanonicalOverlayColor = Literal["green", "red", "yellow", "blue"]
@@ -120,23 +120,25 @@ PIECES = {
     "R": """<g id="white-rook" class="white rook" fill="#fff" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 39h27v-3H9v3zM12 36v-4h21v4H12zM11 14V9h4v2h5V9h5v2h5V9h4v5" stroke-linecap="butt"/><path d="M34 14l-3 3H14l-3-3"/><path d="M31 17v12.5H14V17" stroke-linecap="butt" stroke-linejoin="miter"/><path d="M31 29.5l1.5 2.5h-20l1.5-2.5"/><path d="M11 14h23" fill="none" stroke-linejoin="miter"/></g>""",  # noqa: E501
 }
 
+# Noto Sans Bold glyph outlines (1000 units/em), matching Lichess. These paths
+# keep standalone SVG/raster output independent of installed fonts. See LICENSE-NOTO.
 COORDS = {
-    "1": """<path d="M6.754 26.996h2.578v-8.898l-2.805.562v-1.437l2.79-.563h1.578v10.336h2.578v1.328h-6.72z"/>""",  # noqa: E501
-    "2": """<path d="M8.195 26.996h5.508v1.328H6.297v-1.328q.898-.93 2.445-2.492 1.555-1.57 1.953-2.024.758-.851 1.055-1.437.305-.594.305-1.164 0-.93-.657-1.516-.648-.586-1.695-.586-.742 0-1.57.258-.82.258-1.758.781v-1.593q.953-.383 1.781-.578.828-.196 1.516-.196 1.812 0 2.89.906 1.079.907 1.079 2.422 0 .72-.274 1.368-.265.64-.976 1.515-.196.227-1.243 1.313-1.046 1.078-2.953 3.023z"/>""",  # noqa: E501
-    "3": """<path d="M11.434 22.035q1.132.242 1.765 1.008.64.766.64 1.89 0 1.727-1.187 2.672-1.187.946-3.375.946-.734 0-1.515-.149-.774-.14-1.602-.43V26.45q.656.383 1.438.578.78.196 1.632.196 1.485 0 2.258-.586.782-.586.782-1.703 0-1.032-.727-1.61-.719-.586-2.008-.586h-1.36v-1.297h1.423q1.164 0 1.78-.46.618-.47.618-1.344 0-.899-.64-1.375-.633-.485-1.82-.485-.65 0-1.391.141-.743.14-1.633.437V16.95q.898-.25 1.68-.375.788-.125 1.484-.125 1.797 0 2.844.82 1.046.813 1.046 2.204 0 .968-.554 1.64-.555.664-1.578.922z"/>""",  # noqa: E501
-    "4": """<path d="M11.016 18.035L7.03 24.262h3.985zm-.414-1.375h1.984v7.602h1.664v1.312h-1.664v2.75h-1.57v-2.75H5.75v-1.523z"/>""",  # noqa: E501
-    "5": """<path d="M6.719 16.66h6.195v1.328h-4.75v2.86q.344-.118.688-.172.343-.063.687-.063 1.953 0 3.094 1.07 1.14 1.07 1.14 2.899 0 1.883-1.171 2.93-1.172 1.039-3.305 1.039-.735 0-1.5-.125-.758-.125-1.57-.375v-1.586q.703.383 1.453.57.75.188 1.586.188 1.351 0 2.14-.711.79-.711.79-1.93 0-1.219-.79-1.93-.789-.71-2.14-.71-.633 0-1.266.14-.625.14-1.281.438z"/>""",  # noqa: E501
-    "6": """<path d="M10.137 21.863q-1.063 0-1.688.727-.617.726-.617 1.992 0 1.258.617 1.992.625.727 1.688.727 1.062 0 1.68-.727.624-.734.624-1.992 0-1.266-.625-1.992-.617-.727-1.68-.727zm3.133-4.945v1.437q-.594-.28-1.204-.43-.601-.148-1.195-.148-1.562 0-2.39 1.055-.82 1.055-.938 3.188.46-.68 1.156-1.04.696-.367 1.531-.367 1.758 0 2.774 1.07 1.023 1.063 1.023 2.899 0 1.797-1.062 2.883-1.063 1.086-2.828 1.086-2.024 0-3.094-1.547-1.07-1.555-1.07-4.5 0-2.766 1.312-4.406 1.313-1.649 3.524-1.649.593 0 1.195.117.61.118 1.266.352z"/>""",  # noqa: E501
-    "7": """<path d="M6.25 16.66h7.5v.672L9.516 28.324H7.867l3.985-10.336H6.25z"/>""",  # noqa: E501
-    "8": """<path d="M10 22.785q-1.125 0-1.773.602-.641.601-.641 1.656t.64 1.656q.649.602 1.774.602t1.773-.602q.649-.61.649-1.656 0-1.055-.649-1.656-.64-.602-1.773-.602zm-1.578-.672q-1.016-.25-1.586-.945-.563-.695-.563-1.695 0-1.399.993-2.211 1-.813 2.734-.813 1.742 0 2.734.813.993.812.993 2.21 0 1-.57 1.696-.563.695-1.571.945 1.14.266 1.773 1.04.641.773.641 1.89 0 1.695-1.04 2.602-1.03.906-2.96.906t-2.969-.906Q6 26.738 6 25.043q0-1.117.64-1.89.641-.774 1.782-1.04zm-.578-2.492q0 .906.562 1.414.57.508 1.594.508 1.016 0 1.586-.508.578-.508.578-1.414 0-.906-.578-1.414-.57-.508-1.586-.508-1.023 0-1.594.508-.562.508-.562 1.414z"/>""",  # noqa: E501
-    "a": """<path d="M23.328 10.016q-1.742 0-2.414.398-.672.398-.672 1.36 0 .765.5 1.218.508.445 1.375.445 1.196 0 1.914-.843.727-.852.727-2.258v-.32zm2.867-.594v4.992h-1.437v-1.328q-.492.797-1.227 1.18-.734.375-1.797.375-1.343 0-2.14-.75-.79-.758-.79-2.024 0-1.476.985-2.226.992-.75 2.953-.75h2.016V8.75q0-.992-.656-1.531-.649-.547-1.829-.547-.75 0-1.46.18-.711.18-1.368.539V6.062q.79-.304 1.532-.453.742-.156 1.445-.156 1.898 0 2.836.984.937.985.937 2.985z"/>""",  # noqa: E501
-    "b": """<path d="M24.922 10.047q0-1.586-.656-2.485-.649-.906-1.79-.906-1.14 0-1.796.906-.649.899-.649 2.485 0 1.586.649 2.492.656.898 1.797.898 1.14 0 1.789-.898.656-.906.656-2.492zm-4.89-3.055q.452-.781 1.14-1.156.695-.383 1.656-.383 1.594 0 2.586 1.266 1 1.265 1 3.328 0 2.062-1 3.328-.992 1.266-2.586 1.266-.96 0-1.656-.375-.688-.383-1.14-1.164v1.312h-1.446V2.258h1.445z"/>""",  # noqa: E501
-    "c": """<path d="M25.96 6v1.344q-.608-.336-1.226-.5-.609-.172-1.234-.172-1.398 0-2.172.89-.773.883-.773 2.485 0 1.601.773 2.492.774.883 2.172.883.625 0 1.234-.164.618-.172 1.227-.508v1.328q-.602.281-1.25.422-.64.14-1.367.14-1.977 0-3.14-1.242-1.165-1.242-1.165-3.351 0-2.14 1.172-3.367 1.18-1.227 3.227-1.227.664 0 1.296.14.633.134 1.227.407z"/>""",  # noqa: E501
-    "d": """<path d="M24.973 6.992V2.258h1.437v12.156h-1.437v-1.312q-.453.78-1.149 1.164-.687.375-1.656.375-1.586 0-2.586-1.266-.992-1.266-.992-3.328 0-2.063.992-3.328 1-1.266 2.586-1.266.969 0 1.656.383.696.375 1.149 1.156zm-4.899 3.055q0 1.586.649 2.492.656.898 1.797.898 1.14 0 1.796-.898.657-.906.657-2.492 0-1.586-.657-2.485-.656-.906-1.796-.906-1.141 0-1.797.906-.649.899-.649 2.485z"/>""",  # noqa: E501
-    "e": """<path d="M26.555 9.68v.703h-6.61q.094 1.484.89 2.265.806.774 2.235.774.828 0 1.602-.203.781-.203 1.547-.61v1.36q-.774.328-1.586.5-.813.172-1.649.172-2.093 0-3.32-1.22-1.219-1.218-1.219-3.296 0-2.148 1.157-3.406 1.164-1.266 3.132-1.266 1.766 0 2.79 1.14 1.03 1.134 1.03 3.087zm-1.438-.422q-.015-1.18-.664-1.883-.64-.703-1.703-.703-1.203 0-1.93.68-.718.68-.828 1.914z"/>""",  # noqa: E501
-    "f": """<path d="M25.285 2.258v1.195H23.91q-.773 0-1.078.313-.297.312-.297 1.125v.773h2.367v1.117h-2.367v7.633H21.09V6.781h-1.375V5.664h1.375v-.61q0-1.46.68-2.124.68-.672 2.156-.672z"/>""",  # noqa: E501
-    "g": """<path d="M24.973 9.937q0-1.562-.649-2.421-.64-.86-1.804-.86-1.157 0-1.805.86-.64.859-.64 2.421 0 1.555.64 2.415.648.859 1.805.859 1.164 0 1.804-.86.649-.859.649-2.414zm1.437 3.391q0 2.234-.992 3.32-.992 1.094-3.04 1.094-.757 0-1.429-.117-.672-.11-1.304-.344v-1.398q.632.344 1.25.508.617.164 1.257.164 1.414 0 2.118-.743.703-.734.703-2.226v-.711q-.446.773-1.141 1.156-.695.383-1.664.383-1.61 0-2.594-1.227-.984-1.226-.984-3.25 0-2.03.984-3.257.985-1.227 2.594-1.227.969 0 1.664.383t1.14 1.156V5.664h1.438z"/>""",  # noqa: E501
-    "h": """<path d="M26.164 9.133v5.281h-1.437V9.18q0-1.243-.485-1.86-.484-.617-1.453-.617-1.164 0-1.836.742-.672.742-.672 2.024v4.945h-1.445V2.258h1.445v4.765q.516-.789 1.211-1.18.703-.39 1.617-.39 1.508 0 2.282.938.773.93.773 2.742z"/>""",  # noqa: E501
+    '1': (572, 'M413 0H262V413Q262 430 262.5 455Q263 480 264 507Q265 534 266 555Q261 549 244.5 533.5Q228 518 214 506L132 440L59 531L289 714H413Z'),  # noqa: E501
+    '2': (572, 'M539 0H40V105L219 286Q273 342 306 379.5Q339 417 354 447.5Q369 478 369 513Q369 556 345.5 577Q322 598 282 598Q241 598 202 579Q163 560 120 525L38 622Q69 649 103.5 672Q138 695 183.5 709.5Q229 724 293 724Q363 724 413.5 698.5Q464 673 491.5 629.5Q519 586 519 531Q519 472 495.5 423Q472 374 427.5 326Q383 278 320 220L228 134V127H539Z'),  # noqa: E501
+    '3': (572, 'M511 554Q511 505 490.5 469Q470 433 435.5 410Q401 387 357 376V373Q443 363 487.5 321Q532 279 532 208Q532 146 501.5 96.5Q471 47 407.5 18.5Q344 -10 244 -10Q185 -10 134 0Q83 10 38 29V157Q84 134 134.5 122Q185 110 228 110Q309 110 341.5 138Q374 166 374 217Q374 247 359 267.5Q344 288 306.5 298.5Q269 309 202 309H148V425H203Q269 425 303.5 437.5Q338 450 350.5 471.5Q363 493 363 521Q363 559 339.5 580.5Q316 602 261 602Q227 602 199 593.5Q171 585 148.5 573Q126 561 109 550L39 654Q81 684 137.5 704Q194 724 272 724Q382 724 446.5 679.5Q511 635 511 554Z'),  # noqa: E501
+    '4': (572, 'M555 148H469V0H322V148H17V253L330 714H469V265H555ZM322 386Q322 403 322.5 426.5Q323 450 324 473.5Q325 497 326 515.5Q327 534 328 541H324Q315 521 305 502Q295 483 281 463L150 265H322Z'),  # noqa: E501
+    '5': (572, 'M300 456Q365 456 416 431Q467 406 496.5 358Q526 310 526 239Q526 162 494 106Q462 50 398.5 20Q335 -10 241 -10Q185 -10 135.5 0Q86 10 49 29V159Q86 140 138 126.5Q190 113 236 113Q281 113 311.5 125Q342 137 358 162Q374 187 374 226Q374 279 339 306.5Q304 334 231 334Q203 334 173 328.5Q143 323 123 318L63 350L90 714H477V586H222L209 446Q226 449 245.5 452.5Q265 456 300 456Z'),  # noqa: E501
+    '6': (572, 'M35 303Q35 365 44.0763 425Q53.1525 485 75.5763 538.5Q98 592 138.728 633.5Q179.455 675 241.647 698.5Q303.84 722 393 722Q414 722 442 720.5Q470 719 489 715V594Q470 599 447.5 601.5Q425 604 402.75 604Q336 604 292.5 588Q249 572 224 542Q199 512 187.5 471.5Q176 431 174 381H179.714Q194 405 214.5 423.5Q235 442 265.093 453Q295.185 464 335 464Q398 464 443.5 437.5Q489 411 514 360.479Q539 309.958 539 238.083Q539 161 509.5 105Q480 49 425.59 19.5Q371.181 -10 295.761 -10Q240.813 -10 193.406 9Q146 28 110.5 66.5Q75 105 55 164.201Q35 223.402 35 303ZM292.868 111Q337 111 365 141.5Q393 172 393 236.206Q393 287.571 368.757 317.785Q344.514 348 296.027 348Q263 348 237.954 333.256Q212.908 318.512 198.954 295.829Q185 273.146 185 248.951Q185 224 192 199.5Q199 175 212.66 154.907Q226.32 134.814 246.284 122.907Q266.249 111 292.868 111Z'),  # noqa: E501
+    '7': (572, 'M111 0 379 587H27V714H539V619L269 0Z'),  # noqa: E501
+    '8': (572, 'M286 723Q348 723 399.5 704Q451 685 482.5 647Q514 609 514 551Q514 508 497 475.5Q480 443 451.5 419Q423 395 386 377Q424 357 458.5 330.5Q493 304 514.5 268.5Q536 233 536 185Q536 126 504.5 82Q473 38 416.5 14Q360 -10 286 -10Q206 -10 150 13Q94 36 64.5 79Q35 122 35 181Q35 230 53.5 266Q72 302 103 328.5Q134 355 172 373Q140 393 114 418.5Q88 444 72.5 476.5Q57 509 57 552Q57 609 89 647Q121 685 173.5 704Q226 723 286 723ZM175 190Q175 151 202.5 126Q230 101 284 101Q340 101 368 125Q396 149 396 189Q396 216 380 236.5Q364 257 340.5 273.5Q317 290 292 304L279 311Q248 297 224.5 279Q201 261 188 239.5Q175 218 175 190ZM285 613Q248 613 223.5 594Q199 575 199 540Q199 516 211 497.5Q223 479 243 465.5Q263 452 286 440Q309 451 328.5 464Q348 477 360 495.5Q372 514 372 540Q372 575 347.5 594Q323 613 285 613Z'),  # noqa: E501
+    'a': (599, 'M317.279 555.98Q419.549 555.98 473.869 507.49Q528.189 459 528.189 363.78V0H422.71L393.51 74.17H389.51Q366.51 45.17 342.01 26.28Q317.51 7.39001 285.705 -1.30499Q253.9 -10 208.29 -10Q160.29 -10 122.095 8.52496Q83.9001 27.0499 61.9001 64.9899Q39.9001 102.93 39.9001 161.2Q39.9001 246.69 101.985 289.885Q164.07 333.08 286.53 337.69L378.14 340.69V358.05Q378.14 406.75 355.85 426.346Q333.56 445.941 293.98 445.941Q257.47 445.941 218.25 434.051Q179.03 422.161 141.15 404.941L97.0702 507.54Q140 530.2 195.625 543.09Q251.25 555.98 317.279 555.98ZM320.71 250.46Q249.989 247.68 221.859 226.695Q193.729 205.71 193.729 167.52Q193.729 132.889 213.604 116.464Q233.479 100.039 265.499 100.039Q313.37 100.039 345.865 128.084Q378.36 156.13 378.36 207.9V252.85Z'),  # noqa: E501
+    'b': (632, 'M224.239 582.93Q224.239 551.98 222.434 524.005Q220.629 496.03 218.019 475.37H224.239Q246.019 509.37 282.969 532.675Q319.919 555.98 378.649 555.98Q470.109 555.98 527.254 484.345Q584.399 412.71 584.399 274.1Q584.399 180.88 558.119 117.355Q531.839 53.83 484.584 21.915Q437.329 -10 374.989 -10Q315.039 -10 280.529 11.475Q246.019 32.9501 224.239 59.4602H214.189L188.869 0H73.4103V760H224.239ZM330.1 436.011Q292.009 436.011 268.464 420.001Q244.919 403.991 234.579 371.385Q224.239 338.78 224.239 287.47V269.44Q224.239 191.789 247.589 152.099Q270.939 112.409 332.1 112.409Q380.92 112.409 405.746 154.124Q430.571 195.839 430.571 275.71Q430.571 355.36 406.051 395.686Q381.53 436.011 330.1 436.011Z'),  # noqa: E501
+    'c': (516, 'M310.98 -10Q232.05 -10 172.585 19.61Q113.12 49.22 80.0952 111.44Q47.0702 173.66 47.0702 270.49Q47.0702 370.71 83.1201 433.625Q119.17 496.54 181.16 526.455Q243.15 556.37 322.47 556.37Q369.569 556.37 412.144 546.345Q454.719 536.32 487.869 519.44L443.179 404.961Q413.08 417.621 382.605 426.231Q352.13 434.841 321.69 434.841Q282.939 434.841 255.869 416.721Q228.799 398.601 214.849 362.445Q200.899 326.29 200.899 271.49Q200.899 217.25 215.154 182.009Q229.409 146.769 256.089 129.564Q282.769 112.359 320.349 112.359Q362.52 112.359 400.899 123.799Q439.279 135.239 472.769 154.339V31.1997Q441.499 12.3198 402.594 1.15991Q363.69 -10 310.98 -10Z'),  # noqa: E501
+    'd': (632, 'M252.431 -10Q161.58 -10 104.325 61.6349Q47.0702 133.27 47.0702 272.49Q47.0702 412.93 105.13 484.65Q163.19 556.37 257.09 556.37Q296.041 556.37 324.601 545.87Q353.161 535.37 374.331 517.065Q395.501 498.76 410.281 476.15H415.061Q412.231 494.03 409.731 526.544Q407.231 559.059 407.231 586.259V760H558.669V0H443.14L413.061 70.78H407.231Q393.061 48.39 371.891 30.195Q350.721 12 321.356 1Q291.991 -10 252.431 -10ZM305.47 110.579Q366.68 110.579 391.725 146.404Q416.771 182.229 417.381 255.49V270.88Q417.381 349.53 393.225 391.746Q369.07 433.961 303.86 433.961Q255.429 433.961 227.859 391.796Q200.289 349.63 200.289 269.88Q200.289 190.349 227.859 150.464Q255.429 110.579 305.47 110.579Z'),  # noqa: E501
+    'e': (597, 'M306.03 556.37Q382.349 556.37 437.339 527.59Q492.329 498.81 521.879 443.395Q551.429 387.98 551.429 307.66V235.14H200.289Q202.289 173.42 238.249 137.814Q274.209 102.209 340.789 102.209Q392.399 102.209 434.034 112.014Q475.669 121.819 520.109 142.259V28.6599Q479.719 8.82996 435.144 -0.585022Q390.569 -10 325.2 -10Q244.32 -10 181.55 20.085Q118.78 50.17 82.9251 112.585Q47.0702 175 47.0702 269.49Q47.0702 364.81 79.6201 428.42Q112.17 492.03 170.55 524.2Q228.93 556.37 306.03 556.37ZM309.91 448.991Q264.599 448.991 236.639 420.385Q208.679 391.78 203.509 335.64H410.02Q410.02 368.83 398.765 393.985Q387.51 419.14 365.415 434.065Q343.32 448.991 309.91 448.991Z'),  # noqa: E501
+    'f': (387, 'M380 434H251V0H102V434H20V506L102 546V586Q102 656 125.5 694.5Q149 733 192.5 749Q236 765 295 765Q339 765 374.5 758Q410 751 432 742L394 633Q377 638 357 642.5Q337 647 311 647Q280 647 265.5 628Q251 609 251 580V546H380Z'),  # noqa: E501
+    'g': (632, 'M255.48 556.37Q311.53 556.37 349.76 534.845Q387.991 513.32 413.111 477.2H417.501L430.721 546.37H558.669V-4.12012Q558.669 -81.3401 529.009 -133.755Q499.349 -186.17 438.725 -213.085Q378.1 -240 285.12 -240Q221.63 -240 171.605 -232.415Q121.58 -224.83 78.0905 -207.22V-78.6411Q123.41 -99.2511 170.75 -109.946Q218.09 -120.641 280.36 -120.641Q342.651 -120.641 375.441 -92.0358Q408.231 -63.4305 408.231 -11.7301V2.56006Q408.231 15.17 409.536 34.9251Q410.841 54.6802 413.061 70.39H407.841Q385.331 34.2699 347.796 12.1349Q310.26 -10 254.041 -10Q159.8 -10 103.435 63Q47.0702 136 47.0702 272.49Q47.0702 407.81 104.045 482.09Q161.02 556.37 255.48 556.37ZM304.08 437.231Q270.669 437.231 247.404 418.111Q224.139 398.991 212.519 361.835Q200.899 324.68 200.899 270.27Q200.899 187.74 227.334 148.049Q253.769 108.359 306.69 108.359Q336.71 108.359 357.78 117.029Q378.85 125.699 392.055 143.319Q405.26 160.939 411.516 188.009Q417.771 215.08 417.771 252.1V274.32Q417.771 329.02 406.76 365.175Q395.75 401.331 370.815 419.281Q345.88 437.231 304.08 437.231Z'),  # noqa: E501
+    'h': (650, 'M224.239 607.148Q224.239 562.529 221.824 529.109Q219.409 495.69 217.409 476.03H225.239Q242.849 504.64 266.714 522.03Q290.579 539.42 320.139 547.7Q349.699 555.98 383.089 555.98Q441.989 555.98 485.794 535.175Q529.599 514.37 554.344 470.455Q579.089 426.54 579.089 355.71V0H428.041V317.991Q428.041 376.891 406.97 406.451Q385.9 436.011 340.98 436.011Q296.839 436.011 271.379 415.036Q245.919 394.061 235.079 354.221Q224.239 314.381 224.239 256.26V0H73.4103V760H224.239Z'),  # noqa: E501
 }
 
 XX = """<g id="xx"><path d="M35.865 9.135a1.89 1.89 0 0 1 0 2.673L25.173 22.5l10.692 10.692a1.89 1.89 0 0 1 0 2.673 1.89 1.89 0 0 1-2.673 0L22.5 25.173 11.808 35.865a1.89 1.89 0 0 1-2.673 0 1.89 1.89 0 0 1 0-2.673L19.827 22.5 9.135 11.808a1.89 1.89 0 0 1 0-2.673 1.89 1.89 0 0 1 2.673 0L22.5 19.827 33.192 9.135a1.89 1.89 0 0 1 2.673 0z" fill="#000" stroke="#fff" stroke-width="1.688"/></g>"""  # noqa: E501
@@ -423,22 +425,49 @@ def _points_bbox(points: Iterable[Tuple[float, float]]) -> Tuple[float, float, f
     )
 
 
-def _coord(text: str, x: int, y: int, width: int, height: int, horizontal: bool, margin: int, *, color: str, opacity: float) -> ET.Element:
-    scale = margin / MARGIN
+def _coordinates(*, orientation: Color, style: CoordinateStyle, colors: Dict[str, str],
+                 offset: float, size: Optional[int], full_size: float) -> ET.Element:
+    """In-board labels; Lichess desktop CSS or Chess.com's 100-unit SVG layout."""
+    group = ET.Element("g", {"class": f"coordinates {style}", "pointer-events": "none"})
+    files = list(chess.FILE_NAMES if orientation else reversed(chess.FILE_NAMES))
+    ranks = list(reversed(chess.RANK_NAMES)) if orientation else list(chess.RANK_NAMES)
+    edge = 8 * SQUARE_SIZE
+    pixel = full_size / size if size else 1.0
+    # Lichess coords.files uses flex: 1 1 auto, so glyph advances affect cell widths.
+    advances = [COORDS[name][0] * 12 / 1000 * pixel for name in files]
+    free = (edge - sum(advances)) / 8
+    file_x = 4 * pixel
+    for axis, names in (("rank", ranks), ("file", files)):
+        for index, name in enumerate(names):
+            # Screen top-left is always light. Use the opposite square color.
+            light = (index % 2 == 0) if axis == "rank" and style == "chess.com" else index % 2 == 1
+            key = "coord dark" if light else "coord light"
+            color, opacity = _color(colors[key]) if key in colors else _select_color(colors, "square dark" if light else "square light")
+            if style == "lichess":
+                # Desktop Lichess: 12px bold Noto Sans, ranks top:1px/right:0,
+                # width:.8em; files bottom:0, height:1.4em, padding-left:4px.
+                x = edge - 9.6 * pixel if axis == "rank" else file_x
+                y = index * SQUARE_SIZE + 14 * pixel if axis == "rank" else edge - 3.8 * pixel
+                node = ET.SubElement(group, "path", _attrs({
+                    "d": COORDS[name][1], "data-coordinate": name, "class": axis,
+                    "transform": f"translate({offset + x:g},{offset + y:g}) scale({.012 * pixel:g},{-.012 * pixel:g})",
+                    "fill": color, "opacity": opacity if opacity < 1 else None,
+                }))
+                if axis == "file":
+                    file_x += free + advances[index]
+            else:
+                # Exact SVG positions observed on Chess.com analysis (2026.9.5).
+                x = .75 if axis == "rank" else 10 + index * 12.5
+                y = (3.5 if index == 0 else 3.25 + index * 12.5) if axis == "rank" else 99
+                node = ET.SubElement(group, "text", _attrs({
+                    "x": offset + x * edge / 100, "y": offset + y * edge / 100,
+                    "font-size": 2.8 * edge / 100, "font-weight": 600,
+                    "font-family": "-apple-system, system-ui, Segoe UI, Helvetica, Arial, Liberation Sans, sans-serif",
+                    "fill": color, "opacity": opacity if opacity < 1 else None, "class": axis,
+                }))
+                node.text = name
+    return group
 
-    if horizontal:
-        x += int(width - scale * width) // 2
-    else:
-        y += int(height - scale * height) // 2
-
-    t = ET.Element("g", _attrs({
-        "transform": f"translate({x}, {y}) scale({scale}, {scale})",
-        "fill": color,
-        "stroke": color,
-        "opacity": opacity if opacity < 1.0 else None,
-    }))
-    t.append(ET.fromstring(COORDS[text]))
-    return t
 
 
 def _piece_code(piece: chess.Piece, *, piece_set: str) -> str:
@@ -534,6 +563,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           squares: Optional[IntoSquareSet] = None,
           size: Optional[int] = None,
           coordinates: bool = True,
+          coordinate_style: CoordinateStyle = "lichess",
           colors: Dict[str, str] = {},
           borders: bool = False,
           style: Optional[str] = None,
@@ -567,15 +597,18 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         with an X.
     :param size: The size of the image in pixels (e.g., ``400`` for a 400 by
         400 board), or ``None`` (the default) for no size limit.
-    :param coordinates: Pass ``False`` to disable the coordinate margin.
+    :param coordinates: Render in-board file/rank labels; never adds a gutter.
+    :param coordinate_style: ``"lichess"`` (default) or ``"chess.com"``.
+        Lichess uses desktop 12px Noto Sans Bold outlines. Chess.com uses
+        its native system-font stack, so glyphs depend on the viewing platform.
     :param colors: A dictionary to override default colors. Possible keys are
         ``square light``, ``square dark``, ``square light lastmove``,
-        ``square dark lastmove``, ``margin``, ``coord``, ``inner border``,
+        ``square dark lastmove``, ``coord light``, ``coord dark``,
         ``outer border``, ``arrow green``, ``arrow blue``, ``arrow red``,
         and ``arrow yellow``. Values should look like ``#ffce9e`` (opaque),
         or ``#15781B80`` (transparent).
-    :param borders: Pass ``True`` to enable a border around the board and,
-       (if *coordinates* is enabled) the coordinate margin.
+    :param borders: Pass ``True`` to enable a border around the board edge
+        (coordinates do not add a margin).
     :param style: A CSS stylesheet to include in the SVG image.
     :param legal_moves: Legal moves from one source square whose destinations
         should be marked. Promotion variants sharing a destination are
@@ -620,6 +653,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         squares=squares,
         size=size,
         coordinates=coordinates,
+        coordinate_style=coordinate_style,
         colors=colors,
         borders=borders,
         style=style,
@@ -642,6 +676,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            squares: Optional[IntoSquareSet] = None,
                            size: Optional[int] = None,
                            coordinates: bool = True,
+                           coordinate_style: CoordinateStyle = "lichess",
                            colors: Dict[str, str] = {},
                            borders: bool = False,
                            piece_set: Optional[str] = None,
@@ -666,6 +701,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         squares=squares,
         size=size,
         coordinates=coordinates,
+        coordinate_style=coordinate_style,
         colors=colors,
         borders=borders,
         piece_set=piece_set,
@@ -687,6 +723,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   squares: Optional[IntoSquareSet] = None,
                   size: Optional[int] = None,
                   coordinates: bool = True,
+                  coordinate_style: CoordinateStyle = "lichess",
                   colors: Dict[str, str] = {},
                   borders: bool = False,
                   style: Optional[str] = None,
@@ -697,6 +734,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   user_highlights: Iterable[UserHighlight] = (),
                   ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
     """Builds the shared SVG and annotation result for the public renderers."""
+    if coordinate_style not in ["lichess", "chess.com"]:
+        raise ValueError(f"unsupported coordinate style: {coordinate_style!r}")
     if arrow_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported arrow style: {arrow_style!r}")
     if legal_move_style not in ["lichess", "chess.com"]:
@@ -732,11 +771,9 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
         highlight_palettes[highlight.square] = highlight.palette
     annotations: list[OverlayAnnotation] = []
 
-    inner_border = 1 if borders and coordinates else 0
     outer_border = 1 if borders else 0
-    margin = 15 if coordinates else 0
-    board_offset = inner_border + margin + outer_border
-    full_size = 2 * outer_border + 2 * margin + 2 * inner_border + 8 * SQUARE_SIZE
+    board_offset = outer_border
+    full_size = 2 * outer_border + 8 * SQUARE_SIZE
     svg = _svg(full_size, size)
 
     if style:
@@ -782,45 +819,6 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             "opacity": outer_border_opacity if outer_border_opacity < 1.0 else None,
         }))
 
-    if margin:
-        margin_color, margin_opacity = _select_color(colors, "margin")
-        ET.SubElement(svg, "rect", _attrs({
-            "x": outer_border + margin / 2,
-            "y": outer_border + margin / 2,
-            "width": full_size - 2 * outer_border - margin,
-            "height": full_size - 2 * outer_border - margin,
-            "fill": "none",
-            "stroke": margin_color,
-            "stroke-width": margin,
-            "opacity": margin_opacity if margin_opacity < 1.0 else None,
-        }))
-
-    if inner_border:
-        inner_border_color, inner_border_opacity = _select_color(colors, "inner border")
-        ET.SubElement(svg, "rect", _attrs({
-            "x": outer_border + margin + inner_border / 2,
-            "y": outer_border + margin + inner_border / 2,
-            "width": full_size - 2 * outer_border - 2 * margin - inner_border,
-            "height": full_size - 2 * outer_border - 2 * margin - inner_border,
-            "fill": "none",
-            "stroke": inner_border_color,
-            "stroke-width": inner_border,
-            "opacity": inner_border_opacity if inner_border_opacity < 1.0 else None,
-        }))
-
-    # Render coordinates.
-    if coordinates:
-        coord_color, coord_opacity = _select_color(colors, "coord")
-        for file_index, file_name in enumerate(chess.FILE_NAMES):
-            x = (file_index if orientation else 7 - file_index) * SQUARE_SIZE + board_offset
-            # Keep some padding here to separate the ascender from the border
-            svg.append(_coord(file_name, x, 1, SQUARE_SIZE, margin, True, margin, color=coord_color, opacity=coord_opacity))
-            svg.append(_coord(file_name, x, full_size - outer_border - margin, SQUARE_SIZE, margin, True, margin, color=coord_color, opacity=coord_opacity))
-        for rank_index, rank_name in enumerate(chess.RANK_NAMES):
-            y = (7 - rank_index if orientation else rank_index) * SQUARE_SIZE + board_offset
-            svg.append(_coord(rank_name, 0, y, margin, SQUARE_SIZE, False, margin, color=coord_color, opacity=coord_opacity))
-            svg.append(_coord(rank_name, full_size - outer_border - margin, y, margin, SQUARE_SIZE, False, margin, color=coord_color, opacity=coord_opacity))
-
     # Render board.
     for square, bb in enumerate(chess.BB_SQUARES):
         file_index = chess.square_file(square)
@@ -861,6 +859,10 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                 "fill": fill_color,
                 "opacity": fill_opacity if fill_opacity < 1.0 else None,
             }))
+
+    if coordinates and coordinate_style == "chess.com":
+        svg.append(_coordinates(orientation=orientation, style=coordinate_style,
+                                colors=colors, offset=board_offset, size=size, full_size=full_size))
 
     # Render check mark.
     if check is not None:
@@ -1260,6 +1262,10 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
 
     if len(ghosts):
         svg.append(ghosts)
+
+    if coordinates and coordinate_style == "lichess":
+        svg.append(_coordinates(orientation=orientation, style=coordinate_style,
+                                colors=colors, offset=board_offset, size=size, full_size=full_size))
 
     return BoardRenderResult(
         svg=SvgWrapper(ET.tostring(svg).decode("utf-8")),
