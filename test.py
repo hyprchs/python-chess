@@ -4974,34 +4974,20 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(float(captures[0].get("cx")), 5.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(captures[0].get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(dots[0].get("r")), chess.svg.SQUARE_SIZE * 0.164)
-        self.assertEqual(float(captures[0].get("stroke-width")), 3.0)
+        self.assertEqual(float(captures[0].get("stroke-width")), 3.5)
         self.assertEqual(captures[0].get("opacity"), "0.14")
 
-    def test_svg_chess_com_capture_uses_live_css_sizing(self):
-        # Measured from Chess.com's default .capture-hint at these CSS board sizes.
-        for css_size, expected_width in ((160, 1), (256, 2.2), (360, 3.5), (400, 4),
-                                         (512, 5.4), (600, 6.5), (616, 6.7),
-                                         (620, 6.8), (640, 7), (800, 9), (1024, 11.8)):
-            for raster_size, ratio in ((css_size, 1), (640, 1), (640, 2)):
-                rendered = chess.svg.board_with_annotations(
-                    size=raster_size, css_size=css_size, device_pixel_ratio=ratio, coordinates=False,
-                    destination_markers=[chess.svg.DestinationMarker(chess.E4, "capture")],
-                    legal_move_style="chess.com",
-                )
-                circle = chess.svg.ET.fromstring(rendered.svg).find(
-                    ".//{http://www.w3.org/2000/svg}circle"
-                )
-                self.assertAlmostEqual(float(circle.get("stroke-width")) * css_size / 360,
-                                       max(1, math.floor(expected_width * ratio)) / ratio)
-                self.assertAlmostEqual(float(circle.get("r")) + float(circle.get("stroke-width")) / 2,
-                                       chess.svg.SQUARE_SIZE / 2)
-                self.assertEqual(rendered.annotations[0].bbox_xyxy, (180, 180, 225, 225))
-        for ratio in (0, -1, 17, float("inf"), float("nan")):
-            with self.assertRaisesRegex(ValueError, "device_pixel_ratio"):
-                chess.svg.board(device_pixel_ratio=ratio)
-        for css_size in (0, -1, float("inf"), float("nan")):
-            with self.assertRaisesRegex(ValueError, "css_size"):
-                chess.svg.board(css_size=css_size)
+    def test_svg_chess_com_capture_width_tracks_board_size(self):
+        for size, width in ((360, 3.5), (640, 7), (800, 9)):
+            rendered = chess.svg.board_with_annotations(
+                size=size, coordinates=False, legal_move_style="chess.com",
+                destination_markers=[chess.svg.DestinationMarker(chess.E4, "capture")],
+            )
+            circle = chess.svg.ET.fromstring(rendered.svg).find(
+                ".//{http://www.w3.org/2000/svg}circle"
+            )
+            self.assertAlmostEqual(float(circle.get("stroke-width")) * size / 360, width)
+            self.assertEqual(rendered.annotations[0].bbox_xyxy, (180, 180, 225, 225))
 
     def test_svg_en_passant_destination_is_a_dot(self):
         board = chess.Board("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")

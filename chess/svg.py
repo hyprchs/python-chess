@@ -562,8 +562,6 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           fill: Dict[Square, str] = {},
           squares: Optional[IntoSquareSet] = None,
           size: Optional[int] = None,
-          css_size: Optional[float] = None,
-          device_pixel_ratio: float = 1.0,
           coordinates: bool = True,
           coordinate_style: CoordinateStyle = "lichess",
           colors: Dict[str, str] = {},
@@ -599,12 +597,6 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         with an X.
     :param size: The size of the image in pixels (e.g., ``400`` for a 400 by
         400 board), or ``None`` (the default) for no size limit.
-    :param device_pixel_ratio: CSS device-pixel scale (default 1), used to snap
-        Chess.com capture borders like Chromium. Does not change output size.
-    :param css_size: Logical board size in CSS pixels for size-dependent capture
-        rings. Defaults to *size*, or the SVG viewBox size when *size* is absent.
-        Set separately when resizing a screenshot preview; this does not change
-        image dimensions or annotation coordinates.
     :param coordinates: Render in-board file/rank labels; never adds a gutter.
     :param coordinate_style: ``"lichess"`` (default) or ``"chess.com"``.
         Lichess uses desktop 12px Noto Sans Bold outlines. Chess.com uses
@@ -660,8 +652,6 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         fill=fill,
         squares=squares,
         size=size,
-        css_size=css_size,
-        device_pixel_ratio=device_pixel_ratio,
         coordinates=coordinates,
         coordinate_style=coordinate_style,
         colors=colors,
@@ -685,8 +675,6 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            fill: Dict[Square, str] = {},
                            squares: Optional[IntoSquareSet] = None,
                            size: Optional[int] = None,
-                           css_size: Optional[float] = None,
-                           device_pixel_ratio: float = 1.0,
                            coordinates: bool = True,
                            coordinate_style: CoordinateStyle = "lichess",
                            colors: Dict[str, str] = {},
@@ -712,8 +700,6 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         fill=fill,
         squares=squares,
         size=size,
-        css_size=css_size,
-        device_pixel_ratio=device_pixel_ratio,
         coordinates=coordinates,
         coordinate_style=coordinate_style,
         colors=colors,
@@ -736,8 +722,6 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   fill: Dict[Square, str] = {},
                   squares: Optional[IntoSquareSet] = None,
                   size: Optional[int] = None,
-                  css_size: Optional[float] = None,
-                  device_pixel_ratio: float = 1.0,
                   coordinates: bool = True,
                   coordinate_style: CoordinateStyle = "lichess",
                   colors: Dict[str, str] = {},
@@ -750,10 +734,6 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   user_highlights: Iterable[UserHighlight] = (),
                   ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
     """Builds the shared SVG and annotation result for the public renderers."""
-    if not math.isfinite(device_pixel_ratio) or not 0 < device_pixel_ratio <= 16:
-        raise ValueError("device_pixel_ratio must be finite and in (0, 16]")
-    if css_size is not None and (not math.isfinite(css_size) or css_size <= 0):
-        raise ValueError("css_size must be finite and positive")
     if coordinate_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported coordinate style: {coordinate_style!r}")
     if arrow_style not in ["lichess", "chess.com"]:
@@ -970,15 +950,10 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             }))
             bbox = _box_from_center(cx, cy, radius)
         else:
-            # Chess.com starts with a 5px CSS border, then sets borderWidth to
-            # clientWidth * .1. clientWidth excludes both borders and rounds to
-            # an integer; Chromium then snaps a positive border down to device
-            # pixels, with a one-device-pixel minimum.
-            css_scale = (css_size if css_size is not None else size or full_size) / full_size
-            initial_border = math.floor(5 * device_pixel_ratio) / device_pixel_ratio
-            inner_width = max(0, math.floor(SQUARE_SIZE * css_scale - 2 * initial_border + 0.5))
-            device_width = max(1, math.floor(inner_width * device_pixel_ratio / 10)) if inner_width else 0
-            stroke_width = device_width / device_pixel_ratio / css_scale
+            # Chess.com uses 10% of the square interior after two initial 5px borders.
+            # ponytail: ignore browser pixel snapping; add it only for pixel-exact rendering.
+            scale = (size or full_size) / full_size
+            stroke_width = max(0, SQUARE_SIZE * scale - 10) / 10 / scale
             radius = SQUARE_SIZE / 2 - stroke_width / 2
             ET.SubElement(svg, "circle", _attrs({
                 "cx": cx,
