@@ -4412,6 +4412,28 @@ class SvgTestCase(unittest.TestCase):
         self.assertIn("white bishop", svg)
         self.assertNotIn("black queen", svg)
 
+    def test_inboard_coordinates_preserve_geometry_and_orientation(self):
+        ns = "{http://www.w3.org/2000/svg}"
+        options = dict(size=640, arrows=[(chess.E2, chess.E4)])
+        plain = chess.svg.board_with_annotations(chess.Board(), coordinates=False, **options)
+        for style in ("lichess", "chess.com"):
+            for orientation in chess.COLORS:
+                rendered = chess.svg.board_with_annotations(
+                    chess.Board(), coordinate_style=style, orientation=orientation, **options)
+                reference = chess.svg.board_with_annotations(
+                    chess.Board(), coordinates=False, orientation=orientation, **options)
+                self.assertEqual(rendered.viewbox_size, plain.viewbox_size)
+                self.assertEqual(rendered.annotations, reference.annotations)
+                root = chess.svg.ET.fromstring(rendered.svg)
+                labels = root.find(f"{ns}g[@class='coordinates {style}']")
+                self.assertEqual(len(labels), 16)
+                names = [node.get("data-coordinate") or node.text for node in labels]
+                self.assertEqual(names, list("87654321abcdefgh" if orientation else "12345678hgfedcba"))
+                self.assertEqual(root.find(f"{ns}rect[@class='square light a8']").get("x"), "0" if orientation else "315")
+        with self.assertRaises(ValueError):
+            chess.svg.board(coordinate_style="unsupported")
+        self.assertNotIn('class="coordinates', plain.svg)
+
     def test_svg_arrows(self):
         rendered = chess.svg.board_with_annotations(arrows=[(chess.A1, chess.A1)])
         self.assertIn("<circle", rendered.svg)
@@ -4693,10 +4715,10 @@ class SvgTestCase(unittest.TestCase):
                                 self.assertTrue(top - 1e-9 <= y <= bottom + 1e-9)
 
     def test_svg_painted_landmarks_do_not_change_image_bytes(self):
-        # Captured before changing endpoint annotations; freeze only the SVG ID namespace.
+        # Raster baselines after the in-board coordinate migration; freeze SVG IDs.
         hashes = {
-            "lichess": ("2ae23d098c859e446e68a1df4dd4e04ae2b76b85530a403a464de93829192b13", "59d50324a496a8fdf86eef7c7cece54ec312e87759c899ce692e43e38033f179"),
-            "chess.com": ("c17a170835da923525637b28dfe0b950f48d95c12a337771460dbb094cb5a290", "76e4f876a5dc78e74471585c7aaed5caea148b9860076fa40a4bc0373e61ced9"),
+            "lichess": ("a08a1e2dfdb46509e45f38ad3f56ea13c06c87046cc221c79cfc02ab5f730c6e", "1195b938e3ec86b7bca993f537b6f67b9d7e3d2532924393a122837712ffbd6d"),
+            "chess.com": ("1de6228c6ddf673dfb7b10b80076d5a31fe9f85e66f218bb592e7fa5a77951a4", "1cc934b2ba187771af6b13c33e5dffe4d8fe8ba93d2b0832dbeca4882c1b0c7c"),
         }
         for style, (svg_hash, png_hash) in hashes.items():
             with self.subTest(style=style), patch("chess.svg.uuid.uuid4") as uuid4:
@@ -4999,13 +5021,13 @@ class SvgTestCase(unittest.TestCase):
                         rendered = chess.svg.board_with_annotations(
                             board, ghost_squares=[chess.D4, chess.D4], **options)
                         root = chess.svg.ET.fromstring(rendered.svg)
-                        ghost = root[-1]
+                        ghost = root.find(f"{ns}g[@class='ghosts']")
                         self.assertEqual(ghost.tag, ns + "g")
                         self.assertEqual(ghost.attrib, {"class": "ghosts", "opacity": "0.3"})
                         self.assertEqual(len(ghost), 1)
                         use = ghost[0]
                         self.assertEqual(use.get("href"), "#piece-wN" if piece_set else "#white-knight")
-                        margin = 15 if coordinates else 0
+                        margin = 0
                         x, y = (135, 180) if orientation else (180, 135)
                         self.assertEqual(use.get("transform"), f"translate({x + margin}, {y + margin})")
                         self.assertIsNone(use.get("opacity"))
