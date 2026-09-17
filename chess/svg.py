@@ -562,6 +562,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
           fill: Dict[Square, str] = {},
           squares: Optional[IntoSquareSet] = None,
           size: Optional[int] = None,
+          css_size: Optional[float] = None,
           coordinates: bool = True,
           coordinate_style: CoordinateStyle = "lichess",
           colors: Dict[str, str] = {},
@@ -597,6 +598,10 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         with an X.
     :param size: The size of the image in pixels (e.g., ``400`` for a 400 by
         400 board), or ``None`` (the default) for no size limit.
+    :param css_size: Logical board size in CSS pixels for size-dependent capture
+        rings. Defaults to *size*, or the SVG viewBox size when *size* is absent.
+        Set separately when resizing a screenshot preview; this does not change
+        image dimensions or annotation coordinates.
     :param coordinates: Render in-board file/rank labels; never adds a gutter.
     :param coordinate_style: ``"lichess"`` (default) or ``"chess.com"``.
         Lichess uses desktop 12px Noto Sans Bold outlines. Chess.com uses
@@ -652,6 +657,7 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         fill=fill,
         squares=squares,
         size=size,
+        css_size=css_size,
         coordinates=coordinates,
         coordinate_style=coordinate_style,
         colors=colors,
@@ -675,6 +681,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
                            fill: Dict[Square, str] = {},
                            squares: Optional[IntoSquareSet] = None,
                            size: Optional[int] = None,
+                           css_size: Optional[float] = None,
                            coordinates: bool = True,
                            coordinate_style: CoordinateStyle = "lichess",
                            colors: Dict[str, str] = {},
@@ -700,6 +707,7 @@ def board_with_annotations(board: Optional[chess.BaseBoard] = None, *,
         fill=fill,
         squares=squares,
         size=size,
+        css_size=css_size,
         coordinates=coordinates,
         coordinate_style=coordinate_style,
         colors=colors,
@@ -722,6 +730,7 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   fill: Dict[Square, str] = {},
                   squares: Optional[IntoSquareSet] = None,
                   size: Optional[int] = None,
+                  css_size: Optional[float] = None,
                   coordinates: bool = True,
                   coordinate_style: CoordinateStyle = "lichess",
                   colors: Dict[str, str] = {},
@@ -734,6 +743,8 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
                   user_highlights: Iterable[UserHighlight] = (),
                   ghost_squares: Iterable[Square] = ()) -> BoardRenderResult:
     """Builds the shared SVG and annotation result for the public renderers."""
+    if css_size is not None and (not math.isfinite(css_size) or css_size <= 0):
+        raise ValueError("css_size must be finite and positive")
     if coordinate_style not in ["lichess", "chess.com"]:
         raise ValueError(f"unsupported coordinate style: {coordinate_style!r}")
     if arrow_style not in ["lichess", "chess.com"]:
@@ -950,8 +961,13 @@ def _render_board(board: Optional[chess.BaseBoard] = None, *,
             }))
             bbox = _box_from_center(cx, cy, radius)
         else:
-            radius = SQUARE_SIZE * 0.456
-            stroke_width = SQUARE_SIZE * 0.088
+            # Chess.com starts with a 5px CSS border, then sets borderWidth to
+            # clientWidth * .1. clientWidth excludes both borders and rounds to
+            # an integer. Preserve the resulting CSS width until rasterization.
+            css_scale = (css_size if css_size is not None else size or full_size) / full_size
+            inner_width = max(0, math.floor(SQUARE_SIZE * css_scale - 10 + 0.5))
+            stroke_width = inner_width / 10 / css_scale
+            radius = SQUARE_SIZE / 2 - stroke_width / 2
             ET.SubElement(svg, "circle", _attrs({
                 "cx": cx,
                 "cy": cy,
