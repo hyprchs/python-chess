@@ -603,12 +603,12 @@ def board(board: Optional[chess.BaseBoard] = None, *,
         its native system-font stack, so glyphs depend on the viewing platform.
     :param colors: A dictionary to override default colors. Possible keys are
         ``square light``, ``square dark``, ``square light lastmove``,
-        ``square dark lastmove``, ``margin``, ``coord``, ``inner border``,
+        ``square dark lastmove``, ``coord light``, ``coord dark``,
         ``outer border``, ``arrow green``, ``arrow blue``, ``arrow red``,
         and ``arrow yellow``. Values should look like ``#ffce9e`` (opaque),
         or ``#15781B80`` (transparent).
-    :param borders: Pass ``True`` to enable a border around the board and,
-       the board edge (coordinates do not add a margin).
+    :param borders: Pass ``True`` to enable a border around the board edge
+        (coordinates do not add a margin).
     :param style: A CSS stylesheet to include in the SVG image.
     :param legal_moves: Legal moves from one source square whose destinations
         should be marked. Promotion variants sharing a destination are
