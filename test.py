@@ -4542,6 +4542,25 @@ class SvgTestCase(unittest.TestCase):
                     arrow_style="lichess",
                 )
 
+    def test_svg_highlight_circle_matches_chessground_width(self):
+        import xml.etree.ElementTree as ET
+
+        for palette in ("lichess", "chess.com"):
+            rendered = chess.svg.board_with_annotations(
+                coordinates=False,
+                user_highlights=[chess.svg.UserHighlight(chess.E4, "green", palette)],
+                arrows=[chess.svg.Arrow(chess.E4, chess.E4)],
+                arrow_style="lichess",
+            )
+            root = ET.fromstring(rendered.svg)
+            circles = root.findall(".//{http://www.w3.org/2000/svg}circle")
+            self.assertEqual(len(circles), 2)
+            for circle in circles:
+                self.assertEqual(float(circle.get("stroke-width")), chess.svg.SQUARE_SIZE * 4 / 64)
+                self.assertEqual(float(circle.get("r")), chess.svg.SQUARE_SIZE * 30 / 64)
+            for annotation in rendered.annotations:
+                self.assertEqual(annotation.bbox_xyxy, (180.0, 180.0, 225.0, 225.0))
+
     def test_svg_rejects_mixed_highlight_palettes_on_one_square(self):
         with self.assertRaisesRegex(ValueError, "one square must use one palette"):
             chess.svg.board(
@@ -4715,9 +4734,9 @@ class SvgTestCase(unittest.TestCase):
                                 self.assertTrue(top - 1e-9 <= y <= bottom + 1e-9)
 
     def test_svg_painted_landmarks_do_not_change_image_bytes(self):
-        # Raster baselines after the in-board coordinate migration; freeze SVG IDs.
+        # Raster baselines include in-board coordinates and corrected Lichess circle width.
         hashes = {
-            "lichess": ("a08a1e2dfdb46509e45f38ad3f56ea13c06c87046cc221c79cfc02ab5f730c6e", "1195b938e3ec86b7bca993f537b6f67b9d7e3d2532924393a122837712ffbd6d"),
+            "lichess": ("350da69dd386e25d91c6ab5a29b84eb3d67f7e303876263bc98f6f27d5502008", "f22fa48fbd8c84b94f2994642d073dbf0999ad9f30a0129396d7084b51753035"),
             "chess.com": ("1de6228c6ddf673dfb7b10b80076d5a31fe9f85e66f218bb592e7fa5a77951a4", "1cc934b2ba187771af6b13c33e5dffe4d8fe8ba93d2b0832dbeca4882c1b0c7c"),
         }
         for style, (svg_hash, png_hash) in hashes.items():
@@ -4955,8 +4974,20 @@ class SvgTestCase(unittest.TestCase):
         self.assertEqual(float(captures[0].get("cx")), 5.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(captures[0].get("cy")), 2.5 * chess.svg.SQUARE_SIZE)
         self.assertEqual(float(dots[0].get("r")), chess.svg.SQUARE_SIZE * 0.164)
-        self.assertEqual(float(captures[0].get("stroke-width")), chess.svg.SQUARE_SIZE * 0.088)
+        self.assertEqual(float(captures[0].get("stroke-width")), 3.5)
         self.assertEqual(captures[0].get("opacity"), "0.14")
+
+    def test_svg_chess_com_capture_width_tracks_board_size(self):
+        for size, width in ((360, 3.5), (640, 7), (800, 9)):
+            rendered = chess.svg.board_with_annotations(
+                size=size, coordinates=False, legal_move_style="chess.com",
+                destination_markers=[chess.svg.DestinationMarker(chess.E4, "capture")],
+            )
+            circle = chess.svg.ET.fromstring(rendered.svg).find(
+                ".//{http://www.w3.org/2000/svg}circle"
+            )
+            self.assertAlmostEqual(float(circle.get("stroke-width")) * size / 360, width)
+            self.assertEqual(rendered.annotations[0].bbox_xyxy, (180, 180, 225, 225))
 
     def test_svg_en_passant_destination_is_a_dot(self):
         board = chess.Board("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")
